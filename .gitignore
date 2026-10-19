@@ -1,0 +1,8 @@
+codex工作区/
+node_modules/
+.pnpm-store/
+dist/
+*.local
+.vite/
+playwright-report/
+test-results/
