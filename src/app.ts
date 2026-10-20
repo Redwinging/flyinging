@@ -1,4 +1,12 @@
-import { createElement, Delete, Download, RefreshCw, X } from 'lucide'
+import {
+  createElement,
+  Delete,
+  Download,
+  RefreshCw,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide'
 import {
   evaluateExpression,
   formatExpressionParts,
@@ -57,10 +65,16 @@ export class CalculatorApp {
   private readonly polarElement: HTMLDivElement
   private readonly polarValueElement: HTMLSpanElement
   private readonly updateBanner: HTMLDivElement
-  private readonly installButton: HTMLButtonElement
+  private readonly settingsButton: HTMLButtonElement
+  private readonly settingsLayer: HTMLDivElement
+  private readonly settingsCloseButton: HTMLButtonElement
+  private readonly settingsInstallButton: HTMLButtonElement
+  private readonly settingsClearButton: HTMLButtonElement
+  private readonly settingsStatus: HTMLParagraphElement
   private readonly angleUnitButton: HTMLButtonElement
 
   private expression = ''
+  private cursor = 0
   private angleUnit: AngleUnit = readStoredAngleUnit()
   private result: CalculationResult | null = null
   private lastValue: ComplexValue | null = null
@@ -77,8 +91,18 @@ export class CalculatorApp {
     this.polarElement = this.requireElement<HTMLDivElement>('#polar')
     this.polarValueElement = this.requireElement<HTMLSpanElement>('#polar-value')
     this.updateBanner = this.requireElement<HTMLDivElement>('#update-banner')
-    this.installButton =
-      this.requireElement<HTMLButtonElement>('#install-button')
+    this.settingsButton =
+      this.requireElement<HTMLButtonElement>('#settings-button')
+    this.settingsLayer =
+      this.requireElement<HTMLDivElement>('#settings-layer')
+    this.settingsCloseButton =
+      this.requireElement<HTMLButtonElement>('#settings-close')
+    this.settingsInstallButton =
+      this.requireElement<HTMLButtonElement>('#settings-install')
+    this.settingsClearButton =
+      this.requireElement<HTMLButtonElement>('#settings-clear')
+    this.settingsStatus =
+      this.requireElement<HTMLParagraphElement>('#settings-status')
     this.angleUnitButton =
       this.requireElement<HTMLButtonElement>('#angle-unit')
 
@@ -106,13 +130,19 @@ export class CalculatorApp {
               <h1>复算器</h1>
             </div>
           </div>
-          <button class="header-action" id="install-button" type="button" aria-label="安装到主屏幕" title="安装到主屏幕" hidden></button>
+          <button class="header-action" id="settings-button" type="button" aria-label="打开设置" title="设置" aria-expanded="false"></button>
         </header>
 
         <section class="display" aria-label="计算结果">
           <div class="expression-block">
             <span class="field-label">算式</span>
-            <div class="expression" id="expression" aria-label="当前算式">0</div>
+            <div
+              class="expression"
+              id="expression"
+              role="textbox"
+              tabindex="0"
+              aria-label="当前算式，点击可移动光标"
+            >0</div>
           </div>
 
           <div class="result-block" aria-live="polite">
@@ -130,6 +160,33 @@ export class CalculatorApp {
             ${keypadTemplate}
           </div>
         </section>
+
+        <div class="settings-layer" id="settings-layer" aria-hidden="true">
+          <button class="settings-backdrop" id="settings-backdrop" type="button" aria-label="关闭设置" tabindex="-1"></button>
+          <aside class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <header class="settings-header">
+              <h2 id="settings-title">设置</h2>
+              <button class="settings-close" id="settings-close" type="button" aria-label="关闭设置" title="关闭"></button>
+            </header>
+            <div class="settings-actions">
+              <button class="settings-action" id="settings-install" type="button">
+                <span class="settings-action-icon" aria-hidden="true"></span>
+                <span class="settings-action-copy">
+                  <span class="settings-action-title">下载</span>
+                  <span class="settings-action-note">安装到主屏幕，支持离线使用</span>
+                </span>
+              </button>
+              <button class="settings-action settings-action--danger" id="settings-clear" type="button">
+                <span class="settings-action-icon" aria-hidden="true"></span>
+                <span class="settings-action-copy">
+                  <span class="settings-action-title">清除离线数据</span>
+                  <span class="settings-action-note">删除缓存和本地设置，主屏幕图标需手动移除</span>
+                </span>
+              </button>
+            </div>
+            <p class="settings-status" id="settings-status" role="status"></p>
+          </aside>
+        </div>
 
         <div class="update-banner" id="update-banner" role="status" hidden>
           <span class="update-banner__message">新版本已准备好</span>
@@ -152,8 +209,23 @@ export class CalculatorApp {
         return
       }
 
-      if (key.id === 'install-button') {
+      if (key.id === 'settings-button') {
+        this.openSettings()
+        return
+      }
+
+      if (key.id === 'settings-close' || key.id === 'settings-backdrop') {
+        this.closeSettings()
+        return
+      }
+
+      if (key.id === 'settings-install') {
         void this.installApp()
+        return
+      }
+
+      if (key.id === 'settings-clear') {
+        void this.clearOfflineData()
         return
       }
 
@@ -188,33 +260,42 @@ export class CalculatorApp {
     window.addEventListener('beforeinstallprompt', (event) => {
       event.preventDefault()
       this.installPrompt = event as BeforeInstallPromptEvent
-      this.installButton.hidden = false
+      this.setSettingsStatus('可以从设置中下载到主屏幕')
     })
 
     window.addEventListener('appinstalled', () => {
       this.installPrompt = null
-      this.installButton.hidden = true
+      this.setSettingsStatus('应用已安装到主屏幕')
     })
 
     window.addEventListener('keydown', (event) => {
       this.handlePhysicalKey(event)
     })
+
+    this.expressionElement.addEventListener('pointerdown', (event) => {
+      this.handleExpressionPointer(event)
+    })
   }
 
   private appendDigit(digit: string): void {
     this.prepareForInput(false)
-    const previous = this.expression.at(-1)
+    const previous = this.expression[this.cursor - 1] ?? ''
+    let text = digit
 
     if (previous && /[)i%]/.test(previous)) {
-      this.expression += '*'
+      text = `*${text}`
     }
 
-    const trailingInteger = this.expression.match(/(?:^|[+\-*/(∠])0$/)
+    const before = this.expression.slice(0, this.cursor)
+    const trailingInteger = before.match(/(?:^|[+\-*/(∠])0$/)
     if (trailingInteger && digit !== '0') {
-      this.expression = this.expression.slice(0, -1)
+      this.expression =
+        this.expression.slice(0, this.cursor - 1) +
+        this.expression.slice(this.cursor)
+      this.cursor -= 1
     }
 
-    this.expression += digit
+    this.insertAtCursor(text)
     this.refreshPreview()
     this.render()
   }
@@ -227,47 +308,33 @@ export class CalculatorApp {
 
     if (canContinue) {
       this.expression = valueToExpression(this.lastValue as ComplexValue)
+      this.cursor = this.expression.length
       this.justEvaluated = false
       this.clearResult()
     } else {
       this.prepareForInput(false)
     }
 
-    if (!this.expression) {
-      if (operator === '-') {
-        this.expression = '-'
-        this.refreshPreview()
-        this.render()
-      }
+    const previous = this.expression[this.cursor - 1] ?? ''
+    const next = this.expression[this.cursor] ?? ''
+
+    if (!previous || previous === '∠') {
       return
     }
 
-    const previous = this.expression.at(-1)
-    if (!previous) {
+    if (/[+\-*/]/.test(previous) || /[+\-*/]/.test(next)) {
       return
     }
 
-    if (previous === '(') {
-      if (operator === '-') {
-        this.expression += operator
-        this.refreshPreview()
-        this.render()
-      }
+    if (previous === '(' && operator !== '-') {
       return
     }
 
-    if (previous === '-' && operator === '-') {
-      this.expression += operator
-    } else if (/[+\-*/]/.test(previous)) {
-      if (operator === '-' && /[*/]/.test(previous)) {
-        this.expression += operator
-      } else {
-        this.expression = `${this.expression.slice(0, -1)}${operator}`
-      }
-    } else {
-      this.expression += operator
+    if (next === ')') {
+      return
     }
 
+    this.insertAtCursor(operator)
     this.refreshPreview()
     this.render()
   }
@@ -276,42 +343,55 @@ export class CalculatorApp {
     this.prepareForInput(false)
 
     if (token === '(') {
-      if (this.expression && /[\d)i%]/.test(this.expression.at(-1) ?? '')) {
-        this.expression += '*'
-      }
-      this.expression += '('
+      const previous = this.expression[this.cursor - 1] ?? ''
+      const prefix =
+        previous && previous !== '∠' && /[\d)i%]/.test(previous) ? '*' : ''
+      this.insertAtCursor(`${prefix}(`)
     } else if (token === ')') {
-      if (!this.canCloseParenthesis()) {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      if (
+        !this.hasOpenParenthesisBeforeCursor() ||
+        !previous ||
+        /[+\-*/(∠]/.test(previous)
+      ) {
         return
       }
-      this.expression += ')'
+      this.insertAtCursor(')')
     } else if (token === 'i') {
-      if (this.expression.endsWith('i')) {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      if (
+        previous === '∠' ||
+        previous === 'i' ||
+        this.isInsidePolarAngleContext()
+      ) {
         return
       }
-      if (this.expression && /[\d)%]/.test(this.expression.at(-1) ?? '')) {
-        this.expression += '*'
-      }
-      this.expression += 'i'
+      const prefix = /[\d)%]/.test(previous) ? '*' : ''
+      this.insertAtCursor(`${prefix}i`)
     } else if (token === 'pi') {
-      if (this.expression && /[\d)i%]/.test(this.expression.at(-1) ?? '')) {
-        this.expression += '*'
-      }
-      this.expression += 'pi'
+      const previous = this.expression[this.cursor - 1] ?? ''
+      const prefix = /[\d)i%]/.test(previous) ? '*' : ''
+      this.insertAtCursor(`${prefix}pi`)
     } else if (token === '∠') {
-      const previous = this.expression.at(-1) ?? ''
-      const currentTerm = this.expression.split(/[+\-*/()]/).at(-1) ?? ''
+      const previous = this.expression[this.cursor - 1] ?? ''
+      const currentTerm = this.expression
+        .slice(0, this.cursor)
+        .split(/[+\-*/()]/)
+        .at(-1) ?? ''
       if (!/\d/.test(previous) || currentTerm.includes('∠')) {
         return
       }
-      this.expression += '∠'
+      this.insertAtCursor('∠')
     } else if (token === '%') {
-      if (!this.expression || !/[\d)i%]/.test(this.expression.at(-1) ?? '')) {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      if (
+        !/[\d)i]/.test(previous) ||
+        previous === '∠' ||
+        this.isInsidePolarAngleContext()
+      ) {
         return
       }
-      if (!this.expression.endsWith('%')) {
-        this.expression += '%'
-      }
+      this.insertAtCursor('%')
     }
 
     this.refreshPreview()
@@ -335,12 +415,22 @@ export class CalculatorApp {
 
   private backspace(): void {
     this.prepareForInput(true)
-    if (this.expression.endsWith('conj(')) {
-      this.expression = this.expression.slice(0, -5)
-    } else if (this.expression.endsWith('pi')) {
-      this.expression = this.expression.slice(0, -2)
+    const before = this.expression.slice(0, this.cursor)
+    let deleteLength = 1
+
+    if (before.endsWith('conj(')) {
+      deleteLength = 5
+    } else if (before.endsWith('pi')) {
+      deleteLength = 2
+    }
+
+    if (this.cursor > 0) {
+      this.expression =
+        this.expression.slice(0, this.cursor - deleteLength) +
+        this.expression.slice(this.cursor)
+      this.cursor -= deleteLength
     } else {
-      this.expression = this.expression.slice(0, -1)
+      return
     }
     this.refreshPreview()
     this.render()
@@ -348,19 +438,20 @@ export class CalculatorApp {
 
   private appendDecimal(): void {
     this.prepareForInput(false)
-    const trailingNumber = this.expression.match(/(\d*\.?\d*)$/)?.[0] ?? ''
+    const before = this.expression.slice(0, this.cursor)
+    const previous = before.at(-1) ?? ''
+    const trailingNumber = before.match(/(\d*\.?\d*)$/)?.[0] ?? ''
 
     if (trailingNumber.includes('.')) {
       return
     }
 
-    if (!trailingNumber) {
-      if (this.expression && /[)i%]/.test(this.expression.at(-1) ?? '')) {
-        this.expression += '*'
-      }
-      this.expression += '0.'
+    if (trailingNumber) {
+      this.insertAtCursor('.')
+    } else if (/[)i%]/.test(previous)) {
+      this.insertAtCursor('*0.')
     } else {
-      this.expression += '.'
+      this.insertAtCursor('0.')
     }
 
     this.refreshPreview()
@@ -369,10 +460,12 @@ export class CalculatorApp {
 
   private insertConjugate(): void {
     this.prepareForInput(false)
-    if (this.expression && /[\d)i%]/.test(this.expression.at(-1) ?? '')) {
-      this.expression += '*'
+    const previous = this.expression[this.cursor - 1] ?? ''
+    if (previous === '∠' || this.isInsidePolarAngleContext()) {
+      return
     }
-    this.expression += 'conj('
+    const prefix = /[\d)i%]/.test(previous) ? '*' : ''
+    this.insertAtCursor(`${prefix}conj(`)
     this.refreshPreview()
     this.render()
   }
@@ -404,6 +497,7 @@ export class CalculatorApp {
     }
 
     this.result = evaluateExpression(this.expression, this.angleUnit)
+    this.cursor = this.expression.length
     this.justEvaluated = true
     this.lastValue = this.result.ok ? this.result.value : null
     this.render()
@@ -417,6 +511,9 @@ export class CalculatorApp {
     this.justEvaluated = false
     if (!keepExpression) {
       this.expression = ''
+      this.cursor = 0
+    } else {
+      this.cursor = Math.min(this.cursor, this.expression.length)
     }
     this.clearResult()
   }
@@ -432,13 +529,22 @@ export class CalculatorApp {
       return
     }
 
-    const result = evaluateExpression(this.expression, this.angleUnit)
+    let result = evaluateExpression(this.expression, this.angleUnit)
+
+    if (!result.ok && /[+\-*/∠]$/.test(this.expression)) {
+      result = evaluateExpression(
+        this.expression.slice(0, -1),
+        this.angleUnit,
+      )
+    }
+
     this.result = result.ok ? result : null
     this.lastValue = result.ok ? result.value : null
   }
 
   private resetCalculation(): void {
     this.expression = ''
+    this.cursor = 0
     this.result = null
     this.lastValue = null
     this.justEvaluated = false
@@ -476,39 +582,158 @@ export class CalculatorApp {
 
   private renderExpression(): void {
     const fragment = document.createDocumentFragment()
-    const parts = this.expression
-      ? formatExpressionParts(this.expression)
-      : [{ text: '0', polarAngle: false }]
+    const parts = this.expression ? formatExpressionParts(this.expression) : []
+    let caretPlaced = false
 
     for (const part of parts) {
+      let container: HTMLElement | DocumentFragment = fragment
       if (part.polarAngle) {
-        const span = document.createElement('span')
-        span.className = 'expression-polar'
-        span.textContent = part.text
-        fragment.append(span)
-      } else {
-        fragment.append(document.createTextNode(part.text))
+        container = document.createElement('span')
+        container.className = 'expression-polar'
+        fragment.append(container)
       }
+
+      let index = part.start
+      while (index < part.end) {
+        if (!caretPlaced && this.cursor === index) {
+          container.append(this.createCaretElement())
+          caretPlaced = true
+        }
+
+        const isPi = this.expression.startsWith('pi', index)
+        const end = isPi ? index + 2 : index + 1
+        const character = document.createElement('span')
+        character.className = 'expression-char'
+        character.dataset.start = String(index)
+        character.dataset.end = String(end)
+        character.textContent = isPi ? 'π' : formatExpressionChar(this.expression[index] ?? '')
+        container.append(character)
+
+        if (!caretPlaced && this.cursor > index && this.cursor < end) {
+          container.append(this.createCaretElement())
+          caretPlaced = true
+        }
+
+        index = end
+      }
+    }
+
+    if (!caretPlaced) {
+      fragment.append(this.createCaretElement())
+    }
+
+    if (!this.expression) {
+      fragment.append(document.createTextNode('0'))
     }
 
     this.expressionElement.replaceChildren(fragment)
     this.expressionElement.classList.toggle('is-placeholder', !this.expression)
-    this.expressionElement.scrollLeft = this.expressionElement.scrollWidth
+    this.scrollCaretIntoView()
   }
 
-  private canCloseParenthesis(): boolean {
+  private createCaretElement(): HTMLSpanElement {
+    const caret = document.createElement('span')
+    caret.className = 'expression-caret'
+    caret.setAttribute('aria-hidden', 'true')
+    return caret
+  }
+
+  private scrollCaretIntoView(): void {
+    const caret =
+      this.expressionElement.querySelector<HTMLSpanElement>('.expression-caret')
+    if (!caret) {
+      return
+    }
+
+    const caretBox = caret.getBoundingClientRect()
+    const expressionBox = this.expressionElement.getBoundingClientRect()
+
+    if (caretBox.left < expressionBox.left + 8) {
+      this.expressionElement.scrollLeft -= expressionBox.left + 8 - caretBox.left
+    } else if (caretBox.right > expressionBox.right - 8) {
+      this.expressionElement.scrollLeft +=
+        caretBox.right - expressionBox.right + 8
+    }
+  }
+
+  private insertAtCursor(text: string): void {
+    this.expression =
+      this.expression.slice(0, this.cursor) +
+      text +
+      this.expression.slice(this.cursor)
+    this.cursor += text.length
+  }
+
+  private moveCursor(direction: -1 | 1): void {
+    if (direction < 0) {
+      this.cursor =
+        this.expression.slice(this.cursor - 2, this.cursor) === 'pi'
+          ? this.cursor - 2
+          : Math.max(0, this.cursor - 1)
+    } else {
+      this.cursor =
+        this.expression.slice(this.cursor, this.cursor + 2) === 'pi'
+          ? this.cursor + 2
+          : Math.min(this.expression.length, this.cursor + 1)
+    }
+    this.render()
+  }
+
+  private handleExpressionPointer(event: PointerEvent): void {
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const character = target.closest<HTMLElement>('.expression-char')
+    if (character) {
+      const start = Number(character.dataset.start)
+      const end = Number(character.dataset.end)
+      const box = character.getBoundingClientRect()
+      this.cursor =
+        event.clientX >= box.left + box.width / 2 ? end : start
+    } else {
+      this.cursor = this.expression.length
+    }
+
+    this.justEvaluated = false
+    this.refreshPreview()
+    this.render()
+  }
+
+  private hasOpenParenthesisBeforeCursor(): boolean {
     let depth = 0
-    for (const character of this.expression) {
+    for (const character of this.expression.slice(0, this.cursor)) {
       if (character === '(') depth += 1
       if (character === ')') depth -= 1
     }
 
-    const previous = this.expression.at(-1) ?? ''
-    return depth > 0 && previous !== '' && !/[+\-*/(∠]/.test(previous)
+    return depth > 0
+  }
+
+  private isInsidePolarAngleContext(): boolean {
+    const openParentheses: boolean[] = []
+
+    for (let index = 0; index < this.cursor; index += 1) {
+      const character = this.expression[index]
+      if (character === '(') {
+        openParentheses.push(this.expression[index - 1] === '∠')
+      } else if (character === ')') {
+        openParentheses.pop()
+      }
+    }
+
+    return openParentheses.some(Boolean)
   }
 
   private async installApp(): Promise<void> {
     if (!this.installPrompt) {
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      this.setSettingsStatus(
+        isIos
+          ? '请在 Safari 中打开本页，使用分享菜单的“添加到主屏幕”。'
+          : '请使用浏览器菜单中的“安装应用”或“添加到主屏幕”。',
+      )
       return
     }
 
@@ -516,12 +741,84 @@ export class CalculatorApp {
     const choice = await this.installPrompt.userChoice
     if (choice.outcome === 'accepted') {
       this.installPrompt = null
-      this.installButton.hidden = true
+      this.setSettingsStatus('安装请求已提交')
+    }
+  }
+
+  private openSettings(): void {
+    this.settingsLayer.classList.add('is-open')
+    this.settingsLayer.setAttribute('aria-hidden', 'false')
+    this.settingsButton.setAttribute('aria-expanded', 'true')
+    this.settingsCloseButton.focus()
+  }
+
+  private closeSettings(): void {
+    this.settingsLayer.classList.remove('is-open')
+    this.settingsLayer.setAttribute('aria-hidden', 'true')
+    this.settingsButton.setAttribute('aria-expanded', 'false')
+    this.settingsButton.focus()
+  }
+
+  private setSettingsStatus(message: string): void {
+    this.settingsStatus.textContent = message
+  }
+
+  private async clearOfflineData(): Promise<void> {
+    const confirmed = window.confirm(
+      '确定清除离线缓存和本地设置吗？主屏幕图标仍需手动移除。',
+    )
+    if (!confirmed) {
+      return
+    }
+
+    this.settingsClearButton.disabled = true
+    this.setSettingsStatus('正在清除离线数据…')
+
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        const appScope = new URL(import.meta.env.BASE_URL, location.origin).href
+
+        await Promise.all(
+          registrations
+            .filter((registration) => registration.scope.startsWith(appScope))
+            .map((registration) => registration.unregister()),
+        )
+      }
+
+      if ('caches' in window) {
+        const cacheNames = await window.caches.keys()
+        await Promise.all(
+          cacheNames
+            .filter((name) => /workbox|flyinging/i.test(name))
+            .map((name) => window.caches.delete(name)),
+        )
+      }
+
+      localStorage.removeItem(ANGLE_UNIT_STORAGE_KEY)
+      this.angleUnit = 'degrees'
+      this.updateAngleUnitButton()
+      this.updateBanner.hidden = true
+      this.setSettingsStatus(
+        '离线数据已清除。可返回桌面手动移除“复算器”图标。',
+      )
+    } catch {
+      this.setSettingsStatus('清除失败，请通过浏览器设置删除该网站数据。')
+    } finally {
+      this.settingsClearButton.disabled = false
     }
   }
 
   private handlePhysicalKey(event: KeyboardEvent): void {
     if (event.ctrlKey || event.metaKey || event.altKey) {
+      return
+    }
+
+    if (this.settingsLayer.classList.contains('is-open')) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        this.closeSettings()
+      }
       return
     }
 
@@ -549,6 +846,20 @@ export class CalculatorApp {
     } else if (event.key === 'Backspace') {
       event.preventDefault()
       this.backspace()
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      this.moveCursor(-1)
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      this.moveCursor(1)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      this.cursor = 0
+      this.render()
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      this.cursor = this.expression.length
+      this.render()
     } else if (event.key === 'Escape') {
       event.preventDefault()
       this.resetCalculation()
@@ -574,14 +885,45 @@ export class CalculatorApp {
       }),
     )
 
-    this.installButton.append(
-      createElement(Download, {
+    this.settingsButton.append(
+      createElement(Settings, {
         width: 20,
         height: 20,
         strokeWidth: 2,
         'aria-hidden': 'true',
       }),
     )
+
+    this.settingsCloseButton.append(
+      createElement(X, {
+        width: 20,
+        height: 20,
+        strokeWidth: 2,
+        'aria-hidden': 'true',
+      }),
+    )
+
+    this.settingsInstallButton
+      .querySelector('.settings-action-icon')
+      ?.append(
+        createElement(Download, {
+          width: 20,
+          height: 20,
+          strokeWidth: 2,
+          'aria-hidden': 'true',
+        }),
+      )
+
+    this.settingsClearButton
+      .querySelector('.settings-action-icon')
+      ?.append(
+        createElement(Trash2, {
+          width: 20,
+          height: 20,
+          strokeWidth: 2,
+          'aria-hidden': 'true',
+        }),
+      )
 
     this.requireElement<HTMLButtonElement>('#update-later').append(
       createElement(X, {
@@ -629,4 +971,11 @@ function storeAngleUnit(angleUnit: AngleUnit): void {
   } catch {
     // Storage can be unavailable in private browsing; keep the in-memory value.
   }
+}
+
+function formatExpressionChar(character: string): string {
+  if (character === '*') return '×'
+  if (character === '/') return '÷'
+  if (character === '-') return '−'
+  return character
 }

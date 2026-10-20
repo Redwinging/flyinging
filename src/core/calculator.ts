@@ -60,6 +60,8 @@ export type CalculationResult = CalculationSuccess | CalculationFailure
 export interface ExpressionPart {
   text: string
   polarAngle: boolean
+  start: number
+  end: number
 }
 
 const MAX_EXPRESSION_LENGTH = 180
@@ -163,15 +165,15 @@ export function formatExpressionParts(expression: string): ExpressionPart[] {
   while (cursor < expression.length) {
     const polarIndex = expression.indexOf('∠', cursor)
     if (polarIndex === -1) {
-      pushPlainPart(parts, expression.slice(cursor))
+      pushPlainPart(parts, expression, cursor, expression.length)
       break
     }
 
-    pushPlainPart(parts, expression.slice(cursor, polarIndex))
+    pushPlainPart(parts, expression, cursor, polarIndex)
     const angle = scanPolarAngleText(expression, polarIndex + 1)
 
     if (!angle) {
-      pushPlainPart(parts, '∠')
+      pushPlainPart(parts, expression, polarIndex, polarIndex + 1)
       cursor = polarIndex + 1
       continue
     }
@@ -179,6 +181,8 @@ export function formatExpressionParts(expression: string): ExpressionPart[] {
     parts.push({
       text: formatSymbols(expression.slice(polarIndex, angle.end)),
       polarAngle: true,
+      start: polarIndex,
+      end: angle.end,
     })
     cursor = angle.end
   }
@@ -441,9 +445,19 @@ function scanPolarAngleText(
   }
 }
 
-function pushPlainPart(parts: ExpressionPart[], text: string): void {
-  if (text) {
-    parts.push({ text: formatSymbols(text), polarAngle: false })
+function pushPlainPart(
+  parts: ExpressionPart[],
+  expression: string,
+  start: number,
+  end: number,
+): void {
+  if (end > start) {
+    parts.push({
+      text: formatSymbols(expression.slice(start, end)),
+      polarAngle: false,
+      start,
+      end,
+    })
   }
 }
 

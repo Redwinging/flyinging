@@ -11,15 +11,21 @@ test('calculates real expressions without a separate mode', async ({ page }) => 
   await expect(page.locator('#polar')).toContainText('0°')
 })
 
-test('previews valid input and stays blank while incomplete', async ({ page }) => {
+test('previews the last complete value and stays blank for unusable input', async ({
+  page,
+}) => {
   await page.goto('./')
 
   await clickKey(page, '9')
   await clickKey(page, '×')
-  await expect(page.locator('#result')).toBeEmpty()
+  await expect(page.locator('#result')).toHaveText('9')
 
   await clickKey(page, '9')
   await expect(page.locator('#result')).toHaveText('81')
+
+  await clickKey(page, '÷')
+  await clickKey(page, '(')
+  await expect(page.locator('#result')).toBeEmpty()
 })
 
 test('keeps the keypad fixed while results change', async ({ page }) => {
@@ -131,6 +137,65 @@ test('removes the complete pi token with backspace', async ({ page }) => {
   await expect(page.locator('#expression')).not.toContainText('p')
 })
 
+test('prevents consecutive minus signs and supports parenthesized negatives', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  await clickKey(page, '9')
+  await clickKey(page, '−')
+  await clickKey(page, '−')
+  await expect(page.locator('#expression')).toHaveText('9−')
+
+  await clickKey(page, '(')
+  await clickKey(page, '−')
+  await clickKey(page, '5')
+  await clickKey(page, ')')
+
+  await expect(page.locator('#expression')).toHaveText('9−(−5)')
+  await expect(page.locator('#result')).toHaveText('14')
+})
+
+test('restricts tokens after the polar operator and accepts pi', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  for (const key of ['5', '∠']) {
+    await clickKey(page, key)
+  }
+
+  await clickKey(page, 'i')
+  await clickKey(page, '+')
+  await expect(page.locator('#expression')).toHaveText('5∠')
+
+  await clickKey(page, 'π')
+  await expect(page.locator('#expression')).toHaveText('5∠π')
+  await expect(page.locator('#result')).not.toBeEmpty()
+})
+
+test('moves the visible caret so edits can happen in the middle', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  await clickKey(page, '7')
+  await clickKey(page, '8')
+  await expect(page.locator('.expression-caret')).toHaveCount(1)
+
+  const firstCharacter = page.locator('.expression-char[data-start="0"]')
+  const box = await firstCharacter.boundingBox()
+  expect(box).not.toBeNull()
+  if (box) {
+    await firstCharacter.click({
+      position: { x: box.width - 1, y: box.height / 2 },
+    })
+  }
+
+  await clickKey(page, '9')
+  await expect(page.locator('#expression')).toHaveText('798')
+})
+
 async function clickKey(page: Page, key: string) {
   if (/^\d$/.test(key)) {
     await page.locator(`[data-digit="${key}"]`).click()
@@ -221,4 +286,72 @@ test('serves an installable manifest and icons', async ({ request }) => {
     expect(iconResponse.ok()).toBe(true)
     expect(iconResponse.headers()['content-type']).toContain('image/png')
   }
+})
+
+test('opens the settings drawer with app actions', async ({ page }) => {
+  await page.goto('./')
+  await page.locator('#settings-button').click()
+
+  await expect(page.locator('#settings-layer')).toHaveAttribute(
+    'aria-hidden',
+    'false',
+  )
+  await expect(page.locator('#settings-install')).toContainText('下载')
+  await expect(page.locator('#settings-install')).toContainText(
+    '安装到主屏幕',
+  )
+  await expect(page.locator('#settings-clear')).toContainText('清除离线数据')
+  await expect(page.locator('#settings-clear')).toContainText(
+    '主屏幕图标需手动移除',
+  )
+
+  const presentation = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.settings-panel')
+    const backdrop = document.querySelector<HTMLElement>('.settings-backdrop')
+    const header = document.querySelector<HTMLElement>('.settings-header')
+
+    return {
+      panelTransition: panel
+        ? getComputedStyle(panel).transitionDuration
+        : '',
+      backdropTransition: backdrop
+        ? getComputedStyle(backdrop).transitionDuration
+        : '',
+      headerBackground: header
+        ? getComputedStyle(header).backgroundImage
+        : '',
+    }
+  })
+
+  expect(presentation.panelTransition).toBe('0s')
+  expect(presentation.backdropTransition).toBe('0s')
+  expect(presentation.headerBackground).toContain('linear-gradient')
+
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#settings-layer')).toHaveAttribute(
+    'aria-hidden',
+    'true',
+  )
+})
+
+test('clears app storage and informs the user to remove the icon', async ({
+  page,
+}) => {
+  await page.goto('./')
+  await page.evaluate(() => {
+    localStorage.setItem('flyinging-angle-unit', 'radians')
+  })
+
+  page.once('dialog', (dialog) => {
+    void dialog.accept()
+  })
+
+  await page.locator('#settings-button').click()
+  await page.locator('#settings-clear').click()
+
+  await expect(page.locator('#settings-status')).toContainText('离线数据已清除')
+  await expect(page.locator('#settings-status')).toContainText('手动移除')
+  expect(
+    await page.evaluate(() => localStorage.getItem('flyinging-angle-unit')),
+  ).toBeNull()
 })

@@ -1,4 +1,10 @@
 :root {
+  --header-gradient: linear-gradient(
+    108deg,
+    #8fdced 0%,
+    #65c8e2 48%,
+    #3fa9c7 100%
+  );
   font-family:
     "Avenir Next", "Segoe UI Variable", "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -63,7 +69,7 @@ button:focus-visible {
     14px
     calc(18px + env(safe-area-inset-left));
   color: #fff;
-  background: linear-gradient(108deg, #8fdced 0%, #65c8e2 48%, #3fa9c7 100%);
+  background: var(--header-gradient);
   text-shadow: 0 1px 1px rgba(10, 73, 87, 0.22);
 }
 
@@ -101,7 +107,7 @@ button:focus-visible {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.16em;
-  line-height: 1.2;
+  line-height: 1;
   text-transform: uppercase;
 }
 
@@ -128,10 +134,10 @@ button:focus-visible {
 
 .display {
   display: flex;
-  flex: 0 0 224px;
+  flex: 0 0 246px;
   flex-direction: column;
   gap: 15px;
-  height: 224px;
+  height: 246px;
   overflow: hidden;
   padding: 18px calc(18px + env(safe-area-inset-right)) 20px
     calc(18px + env(safe-area-inset-left));
@@ -155,14 +161,19 @@ button:focus-visible {
 }
 
 .expression {
-  min-height: 28px;
+  display: flex;
+  align-items: center;
+  height: 64px;
+  min-height: 64px;
   overflow-x: auto;
   color: #426a66;
+  cursor: text;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 16px;
+  font-size: 54px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.65;
+  line-height: 1.2;
   scrollbar-width: none;
+  user-select: none;
   white-space: nowrap;
 }
 
@@ -184,26 +195,52 @@ button:focus-visible {
   font-weight: 650;
 }
 
+.expression-char {
+  display: inline-block;
+}
+
+.expression-caret {
+  display: inline-block;
+  flex: 0 0 2px;
+  width: 2px;
+  height: 1em;
+  margin: 0 -1px;
+  border-radius: 1px;
+  background: #087f86;
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
 .result {
-  min-height: 47px;
-  overflow-wrap: anywhere;
+  display: flex;
+  align-items: center;
+  height: 64px;
+  min-height: 64px;
+  overflow-x: auto;
+  overflow-y: hidden;
   color: #103f43;
   font-family:
     "Avenir Next", "Segoe UI Variable", "Segoe UI", "PingFang SC", sans-serif;
-  font-size: 38px;
+  font-size: 54px;
   font-weight: 620;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
-  line-height: 1.18;
-  max-height: 84px;
-  overflow: hidden;
+  line-height: 1.05;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.result::-webkit-scrollbar {
+  display: none;
 }
 
 .result.is-error {
+  display: block;
+  overflow: auto;
   color: #9f493c;
   font-size: 18px;
   font-weight: 650;
   line-height: 1.45;
+  white-space: normal;
 }
 
 .polar {
@@ -324,10 +361,10 @@ button:focus-visible {
 }
 
 .key--equals {
-  border-color: #27bdcb;
+  border-color: #7ccfdf;
   color: #083b43;
-  background: #42d6e3;
-  box-shadow: 0 2px 0 #2099a7;
+  background: #a6efff;
+  box-shadow: 0 2px 0 #78b8c8;
   font-size: 24px;
 }
 
@@ -356,6 +393,160 @@ button:focus-visible {
   color: #f7fffe;
   background: #1c5b64;
   box-shadow: 0 12px 30px rgba(12, 70, 80, 0.24);
+}
+
+.settings-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.settings-layer.is-open {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(8, 48, 55, 0.28);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.settings-layer.is-open .settings-backdrop {
+  opacity: 1;
+}
+
+.settings-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(330px, 88vw);
+  overflow-y: auto;
+  color: #123f43;
+  background: #f9fdfc;
+  box-shadow: -18px 0 45px rgba(11, 62, 70, 0.2);
+  transform: translateX(100%);
+}
+
+.settings-layer.is-open .settings-panel {
+  transform: translateX(0);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    calc(16px + env(safe-area-inset-right))
+    16px
+    20px;
+  color: #fff;
+  background: var(--header-gradient);
+  text-shadow: 0 1px 1px rgba(10, 73, 87, 0.22);
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.settings-close {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  background: transparent;
+  cursor: pointer;
+  place-items: center;
+}
+
+.settings-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+}
+
+.settings-action {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  padding: 16px 20px;
+  border: 0;
+  border-bottom: 1px solid #dceae6;
+  color: #123f43;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-action:hover {
+  background: #edf9f6;
+}
+
+.settings-action:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.settings-action-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  color: #0c777e;
+  place-items: center;
+}
+
+.settings-action-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-action-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.settings-action-note {
+  color: #6a8a86;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-action--danger .settings-action-icon,
+.settings-action--danger .settings-action-title {
+  color: #9e4c40;
+}
+
+.settings-status {
+  min-height: 52px;
+  margin: 0;
+  padding: 14px 20px calc(16px + env(safe-area-inset-bottom));
+  color: #567b77;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .update-banner[hidden] {
@@ -421,7 +612,7 @@ button:focus-visible {
   }
 
   .result {
-    font-size: 42px;
+    font-size: 54px;
   }
 
   .keypad {
@@ -431,16 +622,23 @@ button:focus-visible {
 
 @media (max-height: 700px) {
   .display {
-    flex-basis: 190px;
+    flex-basis: 220px;
     gap: 10px;
-    height: 190px;
+    height: 220px;
     padding-top: 12px;
     padding-bottom: 14px;
   }
 
+  .expression {
+    height: 56px;
+    min-height: 56px;
+    font-size: 42px;
+  }
+
   .result {
-    min-height: 40px;
-    font-size: 32px;
+    height: 56px;
+    min-height: 56px;
+    font-size: 40px;
   }
 
   .keypad {
@@ -457,5 +655,22 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .key {
     transition: none;
+  }
+
+  .expression-caret {
+    animation: none;
+  }
+
+}
+
+@keyframes caret-blink {
+  0%,
+  48% {
+    opacity: 1;
+  }
+
+  49%,
+  100% {
+    opacity: 0;
   }
 }

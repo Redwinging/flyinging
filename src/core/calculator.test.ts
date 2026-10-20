@@ -126,10 +126,10 @@ describe('evaluateExpression', () => {
     }
 
     expect(formatExpressionParts('8∠30*9∠20')).toEqual([
-      { text: '8', polarAngle: false },
-      { text: '∠30', polarAngle: true },
-      { text: '×9', polarAngle: false },
-      { text: '∠20', polarAngle: true },
+      { text: '8', polarAngle: false, start: 0, end: 1 },
+      { text: '∠30', polarAngle: true, start: 1, end: 4 },
+      { text: '×9', polarAngle: false, start: 4, end: 6 },
+      { text: '∠20', polarAngle: true, start: 6, end: 9 },
     ])
   })
 
