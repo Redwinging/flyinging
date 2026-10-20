@@ -23,6 +23,12 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
 }
 
+interface DisplayPreferences {
+  expressionSize: number
+  resultSize: number
+  keySize: number
+}
+
 const keypadTemplate = `
   <button class="key key--utility" type="button" data-action="clear" aria-label="清空">C</button>
   <button class="key key--utility" type="button" data-token="(" aria-label="左括号">(</button>
@@ -76,6 +82,7 @@ export class CalculatorApp {
   private expression = ''
   private cursor = 0
   private angleUnit: AngleUnit = readStoredAngleUnit()
+  private displayPreferences = readStoredDisplayPreferences()
   private result: CalculationResult | null = null
   private lastValue: ComplexValue | null = null
   private justEvaluated = false
@@ -109,6 +116,7 @@ export class CalculatorApp {
     this.addIcons()
     this.bindEvents()
     this.updateAngleUnitButton()
+    this.applyDisplayPreferences()
     this.render()
   }
 
@@ -148,7 +156,7 @@ export class CalculatorApp {
           <div class="result-block" aria-live="polite">
             <span class="field-label" id="result-label">结果</span>
             <div class="result" id="result">0</div>
-            <div class="polar" id="polar" hidden>
+            <div class="polar" id="polar" aria-hidden="true">
               <span>极坐标</span>
               <span id="polar-value"></span>
             </div>
@@ -168,6 +176,30 @@ export class CalculatorApp {
               <h2 id="settings-title">设置</h2>
               <button class="settings-close" id="settings-close" type="button" aria-label="关闭设置" title="关闭"></button>
             </header>
+            <section class="settings-display" aria-labelledby="settings-display-title">
+              <h3 id="settings-display-title">显示大小</h3>
+              <label class="settings-range">
+                <span class="settings-range-heading">
+                  <span>算式字号</span>
+                  <output data-display-output="expressionSize"></output>
+                </span>
+                <input type="range" min="34" max="64" step="1" value="54" data-display-setting="expressionSize" aria-label="调节算式字号">
+              </label>
+              <label class="settings-range">
+                <span class="settings-range-heading">
+                  <span>结果字号</span>
+                  <output data-display-output="resultSize"></output>
+                </span>
+                <input type="range" min="34" max="72" step="1" value="54" data-display-setting="resultSize" aria-label="调节结果字号">
+              </label>
+              <label class="settings-range">
+                <span class="settings-range-heading">
+                  <span>按键大小</span>
+                  <output data-display-output="keySize"></output>
+                </span>
+                <input type="range" min="40" max="64" step="1" value="54" data-display-setting="keySize" aria-label="调节按键大小">
+              </label>
+            </section>
             <div class="settings-actions">
               <button class="settings-action" id="settings-install" type="button">
                 <span class="settings-action-icon" aria-hidden="true"></span>
@@ -274,6 +306,10 @@ export class CalculatorApp {
 
     this.expressionElement.addEventListener('pointerdown', (event) => {
       this.handleExpressionPointer(event)
+    })
+
+    this.settingsLayer.addEventListener('input', (event) => {
+      this.handleDisplaySettingInput(event)
     })
   }
 
@@ -559,7 +595,7 @@ export class CalculatorApp {
     if (!this.result) {
       resultLabel.textContent = '结果'
       this.resultElement.textContent = this.expression ? '' : '0'
-      this.polarElement.hidden = true
+      this.setPolarVisible(false)
       return
     }
 
@@ -567,7 +603,7 @@ export class CalculatorApp {
       resultLabel.textContent = '提示'
       this.resultElement.textContent = this.result.message
       this.resultElement.classList.add('is-error')
-      this.polarElement.hidden = true
+      this.setPolarVisible(false)
       return
     }
 
@@ -577,7 +613,12 @@ export class CalculatorApp {
       this.result.value,
       this.angleUnit,
     )
-    this.polarElement.hidden = false
+    this.setPolarVisible(true)
+  }
+
+  private setPolarVisible(visible: boolean): void {
+    this.polarElement.classList.toggle('is-visible', visible)
+    this.polarElement.setAttribute('aria-hidden', String(!visible))
   }
 
   private renderExpression(): void {
@@ -763,6 +804,102 @@ export class CalculatorApp {
     this.settingsStatus.textContent = message
   }
 
+  private handleDisplaySettingInput(event: Event): void {
+    const target = event.target
+    if (
+      !(target instanceof HTMLInputElement) ||
+      !target.dataset.displaySetting
+    ) {
+      return
+    }
+
+    const setting = target.dataset.displaySetting
+    const value = Number(target.value)
+    if (!Number.isFinite(value)) {
+      return
+    }
+
+    if (setting === 'expressionSize') {
+      this.displayPreferences.expressionSize = value
+    } else if (setting === 'resultSize') {
+      this.displayPreferences.resultSize = value
+    } else if (setting === 'keySize') {
+      this.displayPreferences.keySize = value
+    } else {
+      return
+    }
+
+    this.applyDisplayPreferences()
+    storeDisplayPreferences(this.displayPreferences)
+  }
+
+  private applyDisplayPreferences(): void {
+    const rootStyle = document.documentElement.style
+    const { expressionSize, resultSize, keySize } = this.displayPreferences
+    const keyGap = 8
+
+    rootStyle.setProperty('--expression-size', `${expressionSize}px`)
+    rootStyle.setProperty('--result-size', `${resultSize}px`)
+    rootStyle.setProperty('--expression-height', `${expressionSize + 10}px`)
+    rootStyle.setProperty('--result-height', `${resultSize + 10}px`)
+    rootStyle.setProperty('--key-height', `${keySize}px`)
+    rootStyle.setProperty(
+      '--keypad-height',
+      `${keySize * 7 + keyGap * 6}px`,
+    )
+    rootStyle.setProperty(
+      '--key-digit-size',
+      `${Math.max(16, Math.round(keySize * 0.37))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-operator-size',
+      `${Math.max(17, Math.round(keySize * 0.43))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-equals-size',
+      `${Math.max(18, Math.round(keySize * 0.45))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-utility-size',
+      `${Math.max(14, Math.round(keySize * 0.32))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-function-size',
+      `${Math.max(14, Math.round(keySize * 0.34))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-word-size',
+      `${Math.max(12, Math.round(keySize * 0.27))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-unit-size',
+      `${Math.max(12, Math.round(keySize * 0.27))}px`,
+    )
+
+    this.settingsLayer
+      .querySelectorAll<HTMLInputElement>('[data-display-setting]')
+      .forEach((input) => {
+        const setting = input.dataset.displaySetting as
+          | keyof DisplayPreferences
+          | undefined
+        if (!setting) {
+          return
+        }
+        input.value = String(this.displayPreferences[setting])
+      })
+
+    this.settingsLayer
+      .querySelectorAll<HTMLOutputElement>('[data-display-output]')
+      .forEach((output) => {
+        const setting = output.dataset.displayOutput as
+          | keyof DisplayPreferences
+          | undefined
+        if (setting) {
+          output.textContent = `${this.displayPreferences[setting]} px`
+        }
+      })
+  }
+
   private async clearOfflineData(): Promise<void> {
     const confirmed = window.confirm(
       '确定清除离线缓存和本地设置吗？主屏幕图标仍需手动移除。',
@@ -796,8 +933,11 @@ export class CalculatorApp {
       }
 
       localStorage.removeItem(ANGLE_UNIT_STORAGE_KEY)
+      localStorage.removeItem(DISPLAY_SETTINGS_STORAGE_KEY)
       this.angleUnit = 'degrees'
+      this.displayPreferences = getDefaultDisplayPreferences()
       this.updateAngleUnitButton()
+      this.applyDisplayPreferences()
       this.updateBanner.hidden = true
       this.setSettingsStatus(
         '离线数据已清除。可返回桌面手动移除“复算器”图标。',
@@ -954,6 +1094,12 @@ export class CalculatorApp {
 }
 
 const ANGLE_UNIT_STORAGE_KEY = 'flyinging-angle-unit'
+const DISPLAY_SETTINGS_STORAGE_KEY = 'flyinging-display-settings'
+const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
+  expressionSize: 54,
+  resultSize: 54,
+  keySize: 54,
+}
 
 function readStoredAngleUnit(): AngleUnit {
   try {
@@ -971,6 +1117,82 @@ function storeAngleUnit(angleUnit: AngleUnit): void {
   } catch {
     // Storage can be unavailable in private browsing; keep the in-memory value.
   }
+}
+
+function readStoredDisplayPreferences(): DisplayPreferences {
+  const defaults = getDefaultDisplayPreferences()
+
+  try {
+    const stored = localStorage.getItem(DISPLAY_SETTINGS_STORAGE_KEY)
+    if (!stored) {
+      return defaults
+    }
+
+    const parsed: unknown = JSON.parse(stored)
+    if (!parsed || typeof parsed !== 'object') {
+      return defaults
+    }
+
+    const candidate = parsed as Partial<DisplayPreferences>
+    return {
+      expressionSize: clampPreference(
+        candidate.expressionSize,
+        defaults.expressionSize,
+        34,
+        64,
+      ),
+      resultSize: clampPreference(
+        candidate.resultSize,
+        defaults.resultSize,
+        34,
+        72,
+      ),
+      keySize: clampPreference(
+        candidate.keySize,
+        defaults.keySize,
+        40,
+        64,
+      ),
+    }
+  } catch {
+    return defaults
+  }
+}
+
+function getDefaultDisplayPreferences(): DisplayPreferences {
+  if (window.innerHeight <= 700) {
+    return {
+      expressionSize: 42,
+      resultSize: 40,
+      keySize: 46,
+    }
+  }
+
+  return { ...DEFAULT_DISPLAY_PREFERENCES }
+}
+
+function storeDisplayPreferences(preferences: DisplayPreferences): void {
+  try {
+    localStorage.setItem(
+      DISPLAY_SETTINGS_STORAGE_KEY,
+      JSON.stringify(preferences),
+    )
+  } catch {
+    // Storage can be unavailable in private browsing; keep the in-memory value.
+  }
+}
+
+function clampPreference(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback
+  }
+
+  return Math.min(max, Math.max(min, Math.round(value)))
 }
 
 function formatExpressionChar(character: string): string {

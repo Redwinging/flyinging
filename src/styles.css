@@ -5,6 +5,20 @@
     #65c8e2 48%,
     #3fa9c7 100%
   );
+  --expression-size: 54px;
+  --result-size: 54px;
+  --expression-height: 64px;
+  --result-height: 64px;
+  --key-height: 54px;
+  --keypad-height: 426px;
+  --key-gap: 8px;
+  --key-digit-size: 20px;
+  --key-operator-size: 23px;
+  --key-equals-size: 24px;
+  --key-utility-size: 17px;
+  --key-function-size: 18px;
+  --key-word-size: 15px;
+  --key-unit-size: 15px;
   font-family:
     "Avenir Next", "Segoe UI Variable", "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -134,10 +148,9 @@ button:focus-visible {
 
 .display {
   display: flex;
-  flex: 0 0 246px;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 15px;
-  height: 246px;
   overflow: hidden;
   padding: 18px calc(18px + env(safe-area-inset-right)) 20px
     calc(18px + env(safe-area-inset-left));
@@ -163,13 +176,13 @@ button:focus-visible {
 .expression {
   display: flex;
   align-items: center;
-  height: 64px;
-  min-height: 64px;
+  height: var(--expression-height);
+  min-height: var(--expression-height);
   overflow-x: auto;
   color: #426a66;
   cursor: text;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 54px;
+  font-size: var(--expression-size);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   scrollbar-width: none;
@@ -213,14 +226,14 @@ button:focus-visible {
 .result {
   display: flex;
   align-items: center;
-  height: 64px;
-  min-height: 64px;
+  height: var(--result-height);
+  min-height: var(--result-height);
   overflow-x: auto;
   overflow-y: hidden;
   color: #103f43;
   font-family:
     "Avenir Next", "Segoe UI Variable", "Segoe UI", "PingFang SC", sans-serif;
-  font-size: 54px;
+  font-size: var(--result-size);
   font-weight: 620;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -251,10 +264,11 @@ button:focus-visible {
   color: #087f86;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  visibility: hidden;
 }
 
-.polar[hidden] {
-  display: none;
+.polar.is-visible {
+  visibility: visible;
 }
 
 .polar > span:first-child {
@@ -269,6 +283,7 @@ button:focus-visible {
   flex: 1;
   align-items: center;
   min-height: 0;
+  overflow: hidden;
   padding:
     12px calc(12px + env(safe-area-inset-right))
     calc(12px + env(safe-area-inset-bottom))
@@ -279,21 +294,23 @@ button:focus-visible {
 .keypad {
   display: grid;
   width: 100%;
+  height: min(100%, var(--keypad-height));
+  min-height: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(7, 54px);
-  gap: 8px;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: var(--key-gap);
 }
 
 .key {
   min-width: 0;
-  min-height: 48px;
+  min-height: 0;
   padding: 0;
   border: 1px solid #cfe7e1;
   border-radius: 7px;
   color: #123f43;
   background: #fff;
   box-shadow: 0 2px 0 #bfded7;
-  font-size: 20px;
+  font-size: var(--key-digit-size);
   font-weight: 580;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -322,7 +339,7 @@ button:focus-visible {
 .key--utility {
   color: #3c6e6b;
   background: #effaf7;
-  font-size: 17px;
+  font-size: var(--key-utility-size);
   font-weight: 700;
 }
 
@@ -330,13 +347,13 @@ button:focus-visible {
   color: #0b6970;
   background: #d6f5eb;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 18px;
+  font-size: var(--key-function-size);
   font-style: italic;
 }
 
 .key--function.key--word {
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--key-word-size);
   font-style: normal;
   font-weight: 700;
 }
@@ -344,7 +361,7 @@ button:focus-visible {
 .key--unit {
   color: #0b6970;
   background: #e8faf5;
-  font-size: 14px;
+  font-size: var(--key-unit-size);
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -356,7 +373,7 @@ button:focus-visible {
 .key--operator {
   color: #0c6768;
   background: #d2eeea;
-  font-size: 23px;
+  font-size: var(--key-operator-size);
   font-weight: 650;
 }
 
@@ -365,7 +382,7 @@ button:focus-visible {
   color: #083b43;
   background: #a6efff;
   box-shadow: 0 2px 0 #78b8c8;
-  font-size: 24px;
+  font-size: var(--key-equals-size);
 }
 
 .key--icon {
@@ -434,6 +451,8 @@ button:focus-visible {
   background: #f9fdfc;
   box-shadow: -18px 0 45px rgba(11, 62, 70, 0.2);
   transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.22, 0.8, 0.28, 1);
+  will-change: transform;
 }
 
 .settings-layer.is-open .settings-panel {
@@ -477,6 +496,85 @@ button:focus-visible {
 
 .settings-close:hover {
   background: rgba(255, 255, 255, 0.14);
+}
+
+.settings-display {
+  display: grid;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #dceae6;
+}
+
+.settings-display h3 {
+  margin: 0;
+  color: #4f7673;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.settings-range {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-range-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #173f43;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-range output {
+  color: #567d79;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-range input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-range input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #d8e8e4;
+}
+
+.settings-range input[type="range"]::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #42d6e3;
+  box-shadow: 0 1px 4px rgba(17, 92, 101, 0.22);
+  -webkit-appearance: none;
+}
+
+.settings-range input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #d8e8e4;
+}
+
+.settings-range input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #42d6e3;
+  box-shadow: 0 1px 4px rgba(17, 92, 101, 0.22);
 }
 
 .settings-actions {
@@ -611,44 +709,13 @@ button:focus-visible {
     box-shadow: 0 20px 55px rgba(34, 103, 105, 0.16);
   }
 
-  .result {
-    font-size: 54px;
-  }
-
-  .keypad {
-    grid-template-rows: repeat(7, 58px);
-  }
 }
 
 @media (max-height: 700px) {
   .display {
-    flex-basis: 220px;
     gap: 10px;
-    height: 220px;
     padding-top: 12px;
     padding-bottom: 14px;
-  }
-
-  .expression {
-    height: 56px;
-    min-height: 56px;
-    font-size: 42px;
-  }
-
-  .result {
-    height: 56px;
-    min-height: 56px;
-    font-size: 40px;
-  }
-
-  .keypad {
-    grid-template-rows: repeat(7, 46px);
-    gap: 6px;
-  }
-
-  .key {
-    min-height: 42px;
-    font-size: 18px;
   }
 }
 
@@ -661,6 +728,9 @@ button:focus-visible {
     animation: none;
   }
 
+  .settings-panel {
+    transition: none;
+  }
 }
 
 @keyframes caret-blink {
