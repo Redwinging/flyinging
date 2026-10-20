@@ -290,6 +290,7 @@ test('serves an installable manifest and icons', async ({ request }) => {
 
 test('opens the settings drawer with app actions', async ({ page }) => {
   await page.goto('./')
+  const keypadBefore = await page.locator('.keypad').boundingBox()
   await page.locator('#settings-button').click()
 
   await expect(page.locator('#settings-layer')).toHaveAttribute(
@@ -304,10 +305,34 @@ test('opens the settings drawer with app actions', async ({ page }) => {
   await expect(page.locator('#settings-clear')).toContainText(
     '主屏幕图标需手动移除',
   )
-  await expect(page.locator('.settings-display')).toContainText('显示大小')
-  await expect(page.locator('.settings-display')).toContainText('算式字号')
-  await expect(page.locator('.settings-display')).toContainText('结果字号')
-  await expect(page.locator('.settings-display')).toContainText('按键大小')
+  await expect(page.locator('#settings-display-toggle')).toContainText(
+    '显示大小调整',
+  )
+  await expect(page.locator('#settings-display-controls')).toBeHidden()
+  await page.locator('#settings-display-toggle').click()
+  await expect(page.locator('#settings-display-controls')).toBeVisible()
+  await expect(page.locator('.settings-display-controls')).toContainText(
+    '算式字号',
+  )
+  await expect(page.locator('.settings-display-controls')).toContainText(
+    '结果字号',
+  )
+  await expect(page.locator('.settings-display-controls')).not.toContainText(
+    '按键大小',
+  )
+  await expect(
+    page.locator('[data-display-setting="expressionSize"]'),
+  ).toHaveValue('34')
+  await expect(
+    page.locator('[data-display-setting="resultSize"]'),
+  ).toHaveValue('34')
+  const keypadAfter = await page.locator('.keypad').boundingBox()
+  expect(keypadBefore).not.toBeNull()
+  expect(keypadAfter).not.toBeNull()
+  expect(keypadAfter?.x).toBe(keypadBefore?.x)
+  expect(keypadAfter?.y).toBe(keypadBefore?.y)
+  expect(keypadAfter?.width).toBe(keypadBefore?.width)
+  expect(keypadAfter?.height).toBe(keypadBefore?.height)
 
   const presentation = await page.evaluate(() => {
     const panel = document.querySelector<HTMLElement>('.settings-panel')
@@ -345,32 +370,43 @@ test('opens the settings drawer with app actions', async ({ page }) => {
   )
 })
 
-test('adjusts and persists expression, result, and key sizes', async ({
+test('adjusts and persists expression and result sizes', async ({
   page,
 }) => {
   await page.goto('./')
   await page.locator('#settings-button').click()
+  await page.locator('#settings-display-toggle').click()
 
-  await setRange(page, '[data-display-setting="expressionSize"]', 60)
-  await setRange(page, '[data-display-setting="resultSize"]', 68)
-  await setRange(page, '[data-display-setting="keySize"]', 62)
+  await expect(
+    page.locator('[data-display-setting="expressionSize"]'),
+  ).toHaveAttribute('min', '8')
+  await expect(
+    page.locator('[data-display-setting="expressionSize"]'),
+  ).toHaveAttribute('max', '64')
+  await expect(
+    page.locator('[data-display-setting="resultSize"]'),
+  ).toHaveAttribute('min', '8')
+  await expect(
+    page.locator('[data-display-setting="resultSize"]'),
+  ).toHaveAttribute('max', '64')
+
+  await setRange(page, '[data-display-setting="expressionSize"]', 8)
+  await setRange(page, '[data-display-setting="resultSize"]', 64)
 
   const values = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement)
     return {
       expression: style.getPropertyValue('--expression-size').trim(),
       result: style.getPropertyValue('--result-size').trim(),
-      key: style.getPropertyValue('--key-height').trim(),
       stored: localStorage.getItem('flyinging-display-settings'),
     }
   })
 
-  expect(values.expression).toBe('60px')
-  expect(values.result).toBe('68px')
-  expect(values.key).toBe('62px')
-  expect(values.stored).toContain('"expressionSize":60')
-  expect(values.stored).toContain('"resultSize":68')
-  expect(values.stored).toContain('"keySize":62')
+  expect(values.expression).toBe('8px')
+  expect(values.result).toBe('64px')
+  expect(values.stored).toContain('"expressionSize":8')
+  expect(values.stored).toContain('"resultSize":64')
+  expect(values.stored).not.toContain('keySize')
 
   await page.reload()
   const restored = await page.evaluate(() => {
@@ -378,38 +414,49 @@ test('adjusts and persists expression, result, and key sizes', async ({
     return {
       expression: style.getPropertyValue('--expression-size').trim(),
       result: style.getPropertyValue('--result-size').trim(),
-      key: style.getPropertyValue('--key-height').trim(),
     }
   })
 
-  expect(restored.expression).toBe('60px')
-  expect(restored.result).toBe('68px')
-  expect(restored.key).toBe('62px')
+  expect(restored.expression).toBe('8px')
+  expect(restored.result).toBe('64px')
 })
 
 test('fits a short phone viewport without clipping', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 })
   await page.goto('./')
 
-  const layout = await page.evaluate(() => {
-    const keypad = document.querySelector<HTMLElement>('.keypad')
-    const keypadSection =
-      document.querySelector<HTMLElement>('.keypad-section')
-    const firstKey = document.querySelector<HTMLElement>('.key')
-    return {
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      bodyWidth: document.body.scrollWidth,
-      keypadRight: keypad?.getBoundingClientRect().right ?? 0,
-      keypadBottom: keypadSection?.getBoundingClientRect().bottom ?? 0,
-      keyHeight: firstKey?.getBoundingClientRect().height ?? 0,
-    }
-  })
+  const readLayout = () =>
+    page.evaluate(() => {
+      const keypad = document.querySelector<HTMLElement>('.keypad')
+      const keypadSection =
+        document.querySelector<HTMLElement>('.keypad-section')
+      const firstKey = document.querySelector<HTMLElement>('.key')
+      const style = getComputedStyle(document.documentElement)
+      return {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        bodyWidth: document.body.scrollWidth,
+        keypadRight: keypad?.getBoundingClientRect().right ?? 0,
+        keypadBottom: keypadSection?.getBoundingClientRect().bottom ?? 0,
+        keyHeight: firstKey?.getBoundingClientRect().height ?? 0,
+        expressionSize: style.getPropertyValue('--expression-size').trim(),
+        resultSize: style.getPropertyValue('--result-size').trim(),
+      }
+    })
+
+  const layout = await readLayout()
 
   expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewportWidth)
   expect(layout.keypadRight).toBeLessThanOrEqual(layout.viewportWidth)
   expect(layout.keypadBottom).toBeLessThanOrEqual(layout.viewportHeight)
   expect(layout.keyHeight).toBeGreaterThan(30)
+
+  await page.reload()
+  const reloaded = await readLayout()
+  expect(reloaded.expressionSize).toBe(layout.expressionSize)
+  expect(reloaded.resultSize).toBe(layout.resultSize)
+  expect(reloaded.keypadBottom).toBeLessThanOrEqual(reloaded.viewportHeight)
+  expect(reloaded.keyHeight).toBeGreaterThan(30)
 })
 
 test('clears app storage and informs the user to remove the icon', async ({
@@ -420,7 +467,7 @@ test('clears app storage and informs the user to remove the icon', async ({
     localStorage.setItem('flyinging-angle-unit', 'radians')
     localStorage.setItem(
       'flyinging-display-settings',
-      '{"expressionSize":60,"resultSize":68,"keySize":62}',
+      '{"expressionSize":8,"resultSize":64}',
     )
   })
 

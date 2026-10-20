@@ -5,10 +5,10 @@
     #65c8e2 48%,
     #3fa9c7 100%
   );
-  --expression-size: 54px;
-  --result-size: 54px;
-  --expression-height: 64px;
-  --result-height: 64px;
+  --expression-size: 34px;
+  --result-size: 34px;
+  --expression-height: 44px;
+  --result-height: 44px;
   --key-height: 54px;
   --keypad-height: 426px;
   --key-gap: 8px;
@@ -416,6 +416,7 @@ button:focus-visible {
   position: absolute;
   inset: 0;
   z-index: 30;
+  contain: layout paint style;
   visibility: hidden;
   pointer-events: none;
 }
@@ -447,6 +448,7 @@ button:focus-visible {
   flex-direction: column;
   width: min(330px, 88vw);
   overflow-y: auto;
+  overscroll-behavior: contain;
   color: #123f43;
   background: #f9fdfc;
   box-shadow: -18px 0 45px rgba(11, 62, 70, 0.2);
@@ -499,18 +501,50 @@ button:focus-visible {
 }
 
 .settings-display {
-  display: grid;
-  gap: 16px;
-  padding: 18px 20px;
   border-bottom: 1px solid #dceae6;
 }
 
-.settings-display h3 {
-  margin: 0;
-  color: #4f7673;
-  font-size: 12px;
-  font-weight: 750;
-  letter-spacing: 0.08em;
+.settings-display-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 17px 20px;
+  border: 0;
+  color: #173f43;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-display-toggle:hover {
+  background: #edf9f6;
+}
+
+.settings-display-chevron {
+  display: grid;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  color: #497873;
+  place-items: center;
+  transition: transform 180ms ease;
+}
+
+.settings-display-toggle.is-open .settings-display-chevron {
+  transform: rotate(180deg);
+}
+
+.settings-display-controls {
+  display: grid;
+  gap: 16px;
+  padding: 0 20px 18px;
+}
+
+.settings-display-controls[hidden] {
+  display: none;
 }
 
 .settings-range {

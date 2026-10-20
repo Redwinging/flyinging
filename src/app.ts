@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   createElement,
   Delete,
   Download,
@@ -26,7 +27,6 @@ interface BeforeInstallPromptEvent extends Event {
 interface DisplayPreferences {
   expressionSize: number
   resultSize: number
-  keySize: number
 }
 
 const keypadTemplate = `
@@ -77,6 +77,8 @@ export class CalculatorApp {
   private readonly settingsInstallButton: HTMLButtonElement
   private readonly settingsClearButton: HTMLButtonElement
   private readonly settingsStatus: HTMLParagraphElement
+  private readonly settingsDisplayToggle: HTMLButtonElement
+  private readonly settingsDisplayControls: HTMLDivElement
   private readonly angleUnitButton: HTMLButtonElement
 
   private expression = ''
@@ -110,6 +112,10 @@ export class CalculatorApp {
       this.requireElement<HTMLButtonElement>('#settings-clear')
     this.settingsStatus =
       this.requireElement<HTMLParagraphElement>('#settings-status')
+    this.settingsDisplayToggle =
+      this.requireElement<HTMLButtonElement>('#settings-display-toggle')
+    this.settingsDisplayControls =
+      this.requireElement<HTMLDivElement>('#settings-display-controls')
     this.angleUnitButton =
       this.requireElement<HTMLButtonElement>('#angle-unit')
 
@@ -176,29 +182,27 @@ export class CalculatorApp {
               <h2 id="settings-title">设置</h2>
               <button class="settings-close" id="settings-close" type="button" aria-label="关闭设置" title="关闭"></button>
             </header>
-            <section class="settings-display" aria-labelledby="settings-display-title">
-              <h3 id="settings-display-title">显示大小</h3>
-              <label class="settings-range">
-                <span class="settings-range-heading">
-                  <span>算式字号</span>
-                  <output data-display-output="expressionSize"></output>
-                </span>
-                <input type="range" min="34" max="64" step="1" value="54" data-display-setting="expressionSize" aria-label="调节算式字号">
-              </label>
-              <label class="settings-range">
-                <span class="settings-range-heading">
-                  <span>结果字号</span>
-                  <output data-display-output="resultSize"></output>
-                </span>
-                <input type="range" min="34" max="72" step="1" value="54" data-display-setting="resultSize" aria-label="调节结果字号">
-              </label>
-              <label class="settings-range">
-                <span class="settings-range-heading">
-                  <span>按键大小</span>
-                  <output data-display-output="keySize"></output>
-                </span>
-                <input type="range" min="40" max="64" step="1" value="54" data-display-setting="keySize" aria-label="调节按键大小">
-              </label>
+            <section class="settings-display">
+              <button class="settings-display-toggle" id="settings-display-toggle" type="button" aria-expanded="false" aria-controls="settings-display-controls">
+                <span>显示大小调整</span>
+                <span class="settings-display-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-display-controls" id="settings-display-controls" hidden>
+                <label class="settings-range">
+                  <span class="settings-range-heading">
+                    <span>算式字号</span>
+                    <output data-display-output="expressionSize"></output>
+                  </span>
+                  <input type="range" min="8" max="64" step="1" value="34" data-display-setting="expressionSize" aria-label="调节算式字号">
+                </label>
+                <label class="settings-range">
+                  <span class="settings-range-heading">
+                    <span>结果字号</span>
+                    <output data-display-output="resultSize"></output>
+                  </span>
+                  <input type="range" min="8" max="64" step="1" value="34" data-display-setting="resultSize" aria-label="调节结果字号">
+                </label>
+              </div>
             </section>
             <div class="settings-actions">
               <button class="settings-action" id="settings-install" type="button">
@@ -258,6 +262,11 @@ export class CalculatorApp {
 
       if (key.id === 'settings-clear') {
         void this.clearOfflineData()
+        return
+      }
+
+      if (key.id === 'settings-display-toggle') {
+        this.toggleDisplayControls()
         return
       }
 
@@ -787,21 +796,34 @@ export class CalculatorApp {
   }
 
   private openSettings(): void {
+    this.setDisplayControlsOpen(false)
     this.settingsLayer.classList.add('is-open')
     this.settingsLayer.setAttribute('aria-hidden', 'false')
     this.settingsButton.setAttribute('aria-expanded', 'true')
-    this.settingsCloseButton.focus()
+    this.settingsCloseButton.focus({ preventScroll: true })
   }
 
   private closeSettings(): void {
     this.settingsLayer.classList.remove('is-open')
     this.settingsLayer.setAttribute('aria-hidden', 'true')
     this.settingsButton.setAttribute('aria-expanded', 'false')
-    this.settingsButton.focus()
+    this.settingsButton.focus({ preventScroll: true })
   }
 
   private setSettingsStatus(message: string): void {
     this.settingsStatus.textContent = message
+  }
+
+  private toggleDisplayControls(): void {
+    this.setDisplayControlsOpen(
+      this.settingsDisplayControls.hasAttribute('hidden'),
+    )
+  }
+
+  private setDisplayControlsOpen(isOpen: boolean): void {
+    this.settingsDisplayControls.hidden = !isOpen
+    this.settingsDisplayToggle.setAttribute('aria-expanded', String(isOpen))
+    this.settingsDisplayToggle.classList.toggle('is-open', isOpen)
   }
 
   private handleDisplaySettingInput(event: Event): void {
@@ -823,8 +845,6 @@ export class CalculatorApp {
       this.displayPreferences.expressionSize = value
     } else if (setting === 'resultSize') {
       this.displayPreferences.resultSize = value
-    } else if (setting === 'keySize') {
-      this.displayPreferences.keySize = value
     } else {
       return
     }
@@ -835,7 +855,8 @@ export class CalculatorApp {
 
   private applyDisplayPreferences(): void {
     const rootStyle = document.documentElement.style
-    const { expressionSize, resultSize, keySize } = this.displayPreferences
+    const { expressionSize, resultSize } = this.displayPreferences
+    const keySize = 54
     const keyGap = 8
 
     rootStyle.setProperty('--expression-size', `${expressionSize}px`)
@@ -935,7 +956,7 @@ export class CalculatorApp {
       localStorage.removeItem(ANGLE_UNIT_STORAGE_KEY)
       localStorage.removeItem(DISPLAY_SETTINGS_STORAGE_KEY)
       this.angleUnit = 'degrees'
-      this.displayPreferences = getDefaultDisplayPreferences()
+      this.displayPreferences = { ...DEFAULT_DISPLAY_PREFERENCES }
       this.updateAngleUnitButton()
       this.applyDisplayPreferences()
       this.updateBanner.hidden = true
@@ -1043,6 +1064,17 @@ export class CalculatorApp {
       }),
     )
 
+    this.settingsDisplayToggle
+      .querySelector('.settings-display-chevron')
+      ?.append(
+        createElement(ChevronDown, {
+          width: 18,
+          height: 18,
+          strokeWidth: 2,
+          'aria-hidden': 'true',
+        }),
+      )
+
     this.settingsInstallButton
       .querySelector('.settings-action-icon')
       ?.append(
@@ -1096,9 +1128,8 @@ export class CalculatorApp {
 const ANGLE_UNIT_STORAGE_KEY = 'flyinging-angle-unit'
 const DISPLAY_SETTINGS_STORAGE_KEY = 'flyinging-display-settings'
 const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
-  expressionSize: 54,
-  resultSize: 54,
-  keySize: 54,
+  expressionSize: 34,
+  resultSize: 34,
 }
 
 function readStoredAngleUnit(): AngleUnit {
@@ -1120,7 +1151,7 @@ function storeAngleUnit(angleUnit: AngleUnit): void {
 }
 
 function readStoredDisplayPreferences(): DisplayPreferences {
-  const defaults = getDefaultDisplayPreferences()
+  const defaults = { ...DEFAULT_DISPLAY_PREFERENCES }
 
   try {
     const stored = localStorage.getItem(DISPLAY_SETTINGS_STORAGE_KEY)
@@ -1138,37 +1169,19 @@ function readStoredDisplayPreferences(): DisplayPreferences {
       expressionSize: clampPreference(
         candidate.expressionSize,
         defaults.expressionSize,
-        34,
+        8,
         64,
       ),
       resultSize: clampPreference(
         candidate.resultSize,
         defaults.resultSize,
-        34,
-        72,
-      ),
-      keySize: clampPreference(
-        candidate.keySize,
-        defaults.keySize,
-        40,
+        8,
         64,
       ),
     }
   } catch {
     return defaults
   }
-}
-
-function getDefaultDisplayPreferences(): DisplayPreferences {
-  if (window.innerHeight <= 700) {
-    return {
-      expressionSize: 42,
-      resultSize: 40,
-      keySize: 46,
-    }
-  }
-
-  return { ...DEFAULT_DISPLAY_PREFERENCES }
 }
 
 function storeDisplayPreferences(preferences: DisplayPreferences): void {
