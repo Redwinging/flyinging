@@ -1,28 +1,49 @@
 import {
+  acosDependencies,
   addDependencies,
+  asinDependencies,
+  atanDependencies,
   complexDependencies,
   conjDependencies,
+  cosDependencies,
   create,
   divideDependencies,
+  eDependencies,
   evaluateDependencies,
   iDependencies,
   multiplyDependencies,
   piDependencies,
+  powDependencies,
+  sinDependencies,
+  sqrtDependencies,
   subtractDependencies,
+  tanDependencies,
   unaryMinusDependencies,
   unaryPlusDependencies,
+  type BigNumber,
+  type Complex,
+  type MathType,
 } from 'mathjs'
 
 const math = create({
+  acosDependencies,
   addDependencies,
+  asinDependencies,
+  atanDependencies,
   complexDependencies,
   conjDependencies,
+  cosDependencies,
   divideDependencies,
+  eDependencies,
   evaluateDependencies,
   iDependencies,
   multiplyDependencies,
   piDependencies,
+  powDependencies,
+  sinDependencies,
+  sqrtDependencies,
   subtractDependencies,
+  tanDependencies,
   unaryMinusDependencies,
   unaryPlusDependencies,
 })
@@ -66,15 +87,30 @@ export interface ExpressionPart {
 
 const MAX_EXPRESSION_LENGTH = 180
 const ZERO_TOLERANCE = 1e-12
+const PARALLEL_TOKEN = '||'
+const DEGREES_TO_RADIANS = Math.PI / 180
+const RADIANS_TO_DEGREES = 180 / Math.PI
+/**
+ * 角度制下 `tan(90)` 这类奇点不会得到 ∞，mathjs 只会给出 1.6331239e16 的浮点残值。
+ * 用这个阈值把「逼近奇点」的结果判为无定义，交给上层显示“算式错误”。
+ */
+const TAN_SINGULARITY_THRESHOLD = 1e15
 
 const errorMessages: Record<CalculationErrorCode, string> = {
   EMPTY_EXPRESSION: '请输入算式',
   EXPRESSION_TOO_LONG: '算式过长，请分步计算',
   INCOMPLETE_EXPRESSION: '算式不完整，请检查括号和运算符',
   INVALID_EXPRESSION: '无法识别这个算式',
-  DIVISION_BY_ZERO: '除数不能为零',
-  NON_FINITE_RESULT: '结果超出可计算范围',
+  DIVISION_BY_ZERO: '算式错误：除数不能为零',
+  NON_FINITE_RESULT: '算式错误：结果无定义',
 }
+
+interface FunctionScope {
+  [name: string]: (value: NumericValue) => MathType
+}
+
+/** mathjs 三角函数只接受这三类数值，Complex 让 `sin(i)` 这类复变运算可用。 */
+type NumericValue = number | BigNumber | Complex
 
 export function evaluateExpression(
   expression: string,
@@ -90,18 +126,29 @@ export function evaluateExpression(
     return failure('EXPRESSION_TOO_LONG')
   }
 
-  if (hasUnbalancedParentheses(trimmed) || endsWithOperator(trimmed)) {
+  if (hasUnbalancedParentheses(trimmed) || trailingOperatorLength(trimmed) > 0) {
     return failure('INCOMPLETE_EXPRESSION')
   }
 
-  const normalizedExpression = expandPolarLiterals(trimmed, angleUnit)
+  const normalizedExpression = expandParallelOperators(
+    expandPolarLiterals(trimmed, angleUnit),
+  )
 
-  if (normalizedExpression.includes('∠')) {
+  if (
+    normalizedExpression.includes('∠') ||
+    normalizedExpression.includes(PARALLEL_TOKEN)
+  ) {
     return failure('INVALID_EXPRESSION')
   }
 
   try {
-    const rawValue: unknown = math.evaluate(normalizedExpression)
+    let trigSingularity = false
+    const rawValue: unknown = math.evaluate(
+      normalizedExpression,
+      createFunctionScope(angleUnit, () => {
+        trigSingularity = true
+      }),
+    )
     const normalized = normalizeResult(rawValue)
 
     if (!normalized) {
@@ -112,6 +159,11 @@ export function evaluateExpression(
       !Number.isFinite(normalized.real) ||
       !Number.isFinite(normalized.imaginary)
     ) {
+      // 三角函数撞到奇点（tan 90°）时结果无定义，不要误报成除数为零。
+      if (trigSingularity) {
+        return failure('NON_FINITE_RESULT')
+      }
+
       return failure(
         normalizedExpression.includes('/')
           ? 'DIVISION_BY_ZERO'
@@ -150,6 +202,159 @@ export function evaluateExpression(
 
     return failure('INVALID_EXPRESSION')
   }
+}
+
+/**
+ * 把三角函数按当前角度制包装后注入 mathjs 的 scope：文本不被改写，
+ * 因此 `sin(30)+cos(60)^2`、`sin(asin(0.5))` 这类嵌套都能正常工作。
+ */
+/** mathjs 的重载声明不会收窄到联合类型，这里统一收口，避免每处调用都写断言。 */
+const trig = math as unknown as {
+  sin: (value: NumericValue) => MathType
+  cos: (value: NumericValue) => MathType
+  tan: (value: NumericValue) => MathType
+  asin: (value: NumericValue) => MathType
+  acos: (value: NumericValue) => MathType
+  atan: (value: NumericValue) => MathType
+}
+
+function createFunctionScope(
+  angleUnit: AngleUnit,
+  onSingularity: () => void = () => {},
+): FunctionScope {
+  const toRadians = (value: NumericValue): NumericValue =>
+    angleUnit === 'degrees'
+      ? (math.multiply(value, DEGREES_TO_RADIANS) as NumericValue)
+      : value
+  const fromRadians = (value: MathType): MathType =>
+    angleUnit === 'degrees' ? math.multiply(value, RADIANS_TO_DEGREES) : value
+
+  return {
+    sin: (value) => trig.sin(toRadians(value)),
+    cos: (value) => trig.cos(toRadians(value)),
+    tan: (value) => {
+      const tangent = trig.tan(toRadians(value))
+      if (
+        typeof tangent === 'number' &&
+        Math.abs(tangent) > TAN_SINGULARITY_THRESHOLD
+      ) {
+        onSingularity()
+        return Infinity
+      }
+      return tangent
+    },
+    asin: (value) => fromRadians(trig.asin(value)),
+    acos: (value) => fromRadians(trig.acos(value)),
+    atan: (value) => fromRadians(trig.atan(value)),
+  }
+}
+
+/**
+ * 按输入顺序补齐缺少的右括号。`=` 键与实时预览都用它，
+ * 这样用户不必手动补齐 `sin(30` 末尾的括号。
+ */
+export function autoCloseParentheses(expression: string): string {
+  let depth = 0
+
+  for (const character of expression) {
+    if (character === '(') {
+      depth += 1
+    } else if (character === ')') {
+      depth = Math.max(0, depth - 1)
+    }
+  }
+
+  return depth > 0 ? `${expression}${')'.repeat(depth)}` : expression
+}
+
+/**
+ * 实时预览：比 `=` 更宽容——补右括号、允许末尾停在运算符上，
+ * 只要能算出一个数就展示，避免用户边输入边看到报错。
+ */
+export function evaluatePreview(
+  expression: string,
+  angleUnit: AngleUnit = 'degrees',
+): CalculationResult {
+  const trimmed = expression.trim()
+
+  if (!trimmed) {
+    return failure('EMPTY_EXPRESSION')
+  }
+
+  let lastFailure: CalculationResult | null = null
+
+  for (const candidate of buildPreviewCandidates(trimmed)) {
+    const result = evaluateExpression(candidate, angleUnit)
+    if (result.ok) {
+      return result
+    }
+    lastFailure = result
+  }
+
+  return lastFailure ?? failure('INVALID_EXPRESSION')
+}
+
+function buildPreviewCandidates(expression: string): string[] {
+  const candidates = [expression]
+  const closed = autoCloseParentheses(expression)
+
+  if (closed !== expression) {
+    candidates.push(closed)
+  }
+
+  for (const candidate of [...candidates]) {
+    const trailing = trailingOperatorLength(candidate)
+    if (trailing > 0) {
+      candidates.push(candidate.slice(0, -trailing))
+    }
+  }
+
+  return candidates
+}
+
+/**
+ * 函数名连同左括号算一个整体，退格、方向键、渲染都按整体处理，
+ * 这样 `sin(` 不会被拆成 s、i、n、( 四次删除。
+ */
+const FUNCTION_TOKENS = [
+  'asin(',
+  'acos(',
+  'atan(',
+  'sqrt(',
+  'conj(',
+  'sin(',
+  'cos(',
+  'tan(',
+]
+
+/** 按长度从长到短排列，保证 `asin(` 不会被误判成 `sin(`。 */
+const SYMBOL_TOKENS = [...FUNCTION_TOKENS, 'pi', PARALLEL_TOKEN]
+
+export function matchTokenLengthAt(expression: string, index: number): number {
+  for (const token of SYMBOL_TOKENS) {
+    if (expression.startsWith(token, index)) {
+      return token.length
+    }
+  }
+
+  return 1
+}
+
+export function matchTokenLengthBefore(expression: string, index: number): number {
+  for (const token of SYMBOL_TOKENS) {
+    if (index >= token.length && expression.slice(index - token.length, index) === token) {
+      return token.length
+    }
+  }
+
+  return 1
+}
+
+/** 把内部记号（pi、||、*、/、-）换成界面上的符号；函数名原样返回。 */
+export function formatTokenText(token: string): string {
+  if (token === 'pi') return 'π'
+  if (token === PARALLEL_TOKEN) return '‖'
+  return token.replace('*', '×').replace('/', '÷').replace('-', '−')
 }
 
 export function formatExpression(expression: string): string {
@@ -333,8 +538,16 @@ function hasUnbalancedParentheses(expression: string): boolean {
   return depth !== 0
 }
 
-function endsWithOperator(expression: string): boolean {
-  return /[+\-*/∠]$/.test(expression)
+/**
+ * 末尾若停在一个等待右操作数的运算符上，返回该运算符的长度，否则返回 0。
+ * `||`（并联）占两个字符，其余运算符各占一个字符。
+ */
+export function trailingOperatorLength(expression: string): number {
+  if (expression.endsWith(PARALLEL_TOKEN)) {
+    return PARALLEL_TOKEN.length
+  }
+
+  return /[+\-*/∠]$/.test(expression) ? 1 : 0
 }
 
 function expandPolarLiterals(
@@ -472,4 +685,107 @@ function polarToRectangularLiteral(
   const sign = imaginary < 0 ? '-' : '+'
 
   return `(${serializeNumber(real)}${sign}${serializeNumber(Math.abs(imaginary))}i)`
+}
+
+/**
+ * 把并联表达式 `a||b` 展开成 `(a*b)/(a+b)`，即 a 与 b 的并联阻抗/电阻。
+ * 只作用于紧贴 `||` 的两个操作数（数字、含 i 的复数字面量、pi、括号表达式或
+ * conj(...) 这类调用），因此 `||` 的优先级高于加减乘除；需要别的结合顺序请加括号。
+ * 连续写法 `a||b||c` 从左到右依次展开，结果与三支并联一致。
+ */
+function expandParallelOperators(expression: string): string {
+  let current = expression
+  let guard = 0
+
+  while (current.includes(PARALLEL_TOKEN) && guard < MAX_EXPRESSION_LENGTH) {
+    guard += 1
+    const index = current.indexOf(PARALLEL_TOKEN)
+    const left = readOperandBackward(current, index)
+    const right = readOperandForward(current, index + PARALLEL_TOKEN.length)
+
+    if (!left || !right) {
+      return expression
+    }
+
+    const leftText = current.slice(left.start, left.end)
+    const rightText = current.slice(right.start, right.end)
+
+    current = `${current.slice(0, left.start)}(((${leftText})*(${rightText}))/((${leftText})+(${rightText})))${current.slice(right.end)}`
+  }
+
+  return current
+}
+
+const OPERAND_LITERAL = /^(?:pi|i|(?:\d+(?:\.\d*)?|\.\d+)i?%?)$/
+
+function readOperandBackward(
+  expression: string,
+  end: number,
+): { start: number; end: number } | null {
+  if (end <= 0) {
+    return null
+  }
+
+  if (expression[end - 1] === ')') {
+    let depth = 0
+
+    for (let index = end - 1; index >= 0; index -= 1) {
+      const character = expression[index]
+      if (character === ')') {
+        depth += 1
+      } else if (character === '(') {
+        depth -= 1
+        if (depth === 0) {
+          let start = index
+          while (start > 0 && /[a-zA-Z]/.test(expression[start - 1] ?? '')) {
+            start -= 1
+          }
+          return { start, end }
+        }
+      }
+    }
+
+    return null
+  }
+
+  let start = end
+  while (start > 0 && /[\w.%]/.test(expression[start - 1] ?? '')) {
+    start -= 1
+  }
+
+  const text = expression.slice(start, end)
+  return OPERAND_LITERAL.test(text) ? { start, end } : null
+}
+
+function readOperandForward(
+  expression: string,
+  start: number,
+): { start: number; end: number } | null {
+  if (expression[start] === '(') {
+    let depth = 0
+
+    for (let index = start; index < expression.length; index += 1) {
+      const character = expression[index]
+      if (character === '(') {
+        depth += 1
+      } else if (character === ')') {
+        depth -= 1
+        if (depth === 0) {
+          return { start, end: index + 1 }
+        }
+      }
+    }
+
+    return null
+  }
+
+  const match = expression
+    .slice(start)
+    .match(/^[+-]?(?:pi|i|(?:\d+(?:\.\d*)?|\.\d+)i?%?)/)
+
+  if (!match || !OPERAND_LITERAL.test(match[0].replace(/^[+-]/, ''))) {
+    return null
+  }
+
+  return { start, end: start + match[0].length }
 }

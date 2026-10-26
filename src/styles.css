@@ -259,23 +259,54 @@ button:focus-visible {
 .polar {
   display: flex;
   align-items: baseline;
-  gap: 9px;
+  gap: 7px;
   min-height: 20px;
+  margin: 0 -2px;
+  padding: 1px 2px;
+  border: 0;
   color: #087f86;
+  background: none;
+  font-family: inherit;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
   visibility: hidden;
+  border-radius: 4px;
 }
 
 .polar.is-visible {
   visibility: visible;
 }
 
-.polar > span:first-child {
+.polar:focus-visible {
+  outline: 2px solid #4ec5c9;
+  outline-offset: 2px;
+}
+
+.polar-label {
   color: #6f918d;
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.08em;
+  border-bottom: 1px dashed #a8c8c3;
+}
+
+.polar:hover .polar-label {
+  color: #0b6970;
+  border-bottom-color: #0b6970;
+}
+
+.polar-unit-badge {
+  align-self: center;
+  color: #0b6970;
+  background: #d6f5eb;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .keypad-section {
@@ -297,7 +328,7 @@ button:focus-visible {
   height: min(100%, var(--keypad-height));
   min-height: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(9, minmax(0, 1fr));
   gap: var(--key-gap);
 }
 
@@ -358,12 +389,70 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.key--trig {
+  color: #0b6970;
+  background: #d6f5eb;
+  font-size: var(--key-trig-size);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.key-fn-exponent {
+  margin-left: 1px;
+  font-size: 0.68em;
+  vertical-align: super;
+}
+
+.key--inverse {
+  color: #0b6970;
+  background: #e8faf5;
+  box-shadow: 0 2px 0 #c4e3dc;
+  font-size: var(--key-inverse-size);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.key--inverse.is-active {
+  border-color: #4fb8c4;
+  color: #f7fffe;
+  background: #17727c;
+  box-shadow: 0 2px 0 #0e5761;
+}
+
 .key--unit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
   color: #0b6970;
   background: #e8faf5;
   font-size: var(--key-unit-size);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+}
+
+.unit-option {
+  color: #7faeaa;
+  font-weight: 600;
+  transition: color 120ms ease;
+}
+
+.unit-option.is-active {
+  color: #0b6970;
+  font-weight: 800;
+}
+
+.unit-separator {
+  color: #a9c9c4;
+  font-weight: 500;
+}
+
+.key--parallel {
+  color: #0b6970;
+  background: #e8faf5;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .key--span-2 {
@@ -750,6 +839,26 @@ button:focus-visible {
     gap: 10px;
     padding-top: 12px;
     padding-bottom: 14px;
+  }
+
+  /* 矮屏上再让出一点高度给键盘，避免 9 行按键被压得太扁。 */
+  .keypad {
+    --key-gap: 6px;
+  }
+
+  .keypad-section {
+    padding-top: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .key--unit {
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+
+  .key--parallel {
+    font-size: 16px;
   }
 }
 

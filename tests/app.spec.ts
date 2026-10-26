@@ -77,7 +77,7 @@ test('shows calculation errors without breaking the app', async ({ page }) => {
     await clickKey(page, key)
   }
 
-  await expect(page.locator('#result')).toHaveText('除数不能为零')
+  await expect(page.locator('#result')).toHaveText('算式错误：除数不能为零')
   await page.locator('[data-action="clear"]').click()
   await expect(page.locator('#result')).toHaveText('0')
 })
@@ -85,7 +85,8 @@ test('shows calculation errors without breaking the app', async ({ page }) => {
 test('calculates polar input in degrees', async ({ page }) => {
   await page.goto('./')
 
-  await expect(page.locator('#angle-unit')).toHaveText('角度制')
+  await expect(page.locator('#angle-unit')).toHaveText('deg/rad')
+  await expect(page.locator('#angle-unit .is-active')).toHaveText('deg')
   for (const key of ['5', '∠', '3', '0']) {
     await clickKey(page, key)
   }
@@ -113,16 +114,86 @@ test('groups each polar angle with its own operand', async ({ page }) => {
 test('switches to radians and accepts pi', async ({ page }) => {
   await page.goto('./')
   await page.locator('#angle-unit').click()
-  await expect(page.locator('#angle-unit')).toHaveText('弧度制')
+  await expect(page.locator('#angle-unit .is-active')).toHaveText('rad')
 
   for (const key of ['5', '∠', 'π']) {
     await clickKey(page, key)
   }
 
   await expect(page.locator('#result')).toHaveText('−5')
-  await expect(page.locator('#polar-value')).toHaveText(
-    '5 ∠ 3.14159265359 rad',
-  )
+  // 极坐标默认始终按角度制显示，与按键单位解耦。
+  await expect(page.locator('#polar-value')).toHaveText('5 ∠ 180°')
+})
+
+test('toggles only the polar result unit when the polar row is clicked', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  for (const key of ['5', '∠', '3', '0']) {
+    await clickKey(page, key)
+  }
+
+  await expect(page.locator('#polar-value')).toHaveText('5 ∠ 30°')
+  await expect(page.locator('#polar-unit-badge')).toHaveText('deg')
+
+  await page.locator('#polar').click()
+  await expect(page.locator('#polar-value')).toHaveText('5 ∠ 0.523598775598 rad')
+  await expect(page.locator('#polar-unit-badge')).toHaveText('rad')
+  // 按键单位未受影响，仍为角度制。
+  await expect(page.locator('#angle-unit .is-active')).toHaveText('deg')
+
+  await page.locator('#polar').click()
+  await expect(page.locator('#polar-value')).toHaveText('5 ∠ 30°')
+})
+
+test('keeps the polar unit at degrees when the angle unit key changes', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  for (const key of ['5', '∠', '3', '0']) {
+    await clickKey(page, key)
+  }
+
+  await page.locator('#angle-unit').click()
+  await expect(page.locator('#angle-unit .is-active')).toHaveText('rad')
+  await expect(page.locator('#polar-unit-badge')).toHaveText('deg')
+
+  await page.reload()
+  await expect(page.locator('#polar-unit-badge')).toHaveText('deg')
+})
+
+test('calculates parallel values with the ‖ key', async ({ page }) => {
+  await page.goto('./')
+
+  for (const key of ['6', '‖', '3']) {
+    await clickKey(page, key)
+  }
+
+  await expect(page.locator('#expression')).toHaveText('6‖3')
+  await expect(page.locator('#result')).toHaveText('2')
+
+  for (const key of ['‖', '2']) {
+    await clickKey(page, key)
+  }
+
+  await expect(page.locator('#expression')).toHaveText('6‖3‖2')
+  await expect(page.locator('#result')).toHaveText('1')
+})
+
+test('removes the whole ‖ token with backspace', async ({ page }) => {
+  await page.goto('./')
+
+  for (const key of ['6', '‖', '3']) {
+    await clickKey(page, key)
+  }
+
+  await page.locator('[data-action="backspace"]').click()
+  await expect(page.locator('#expression')).toHaveText('6‖')
+
+  await page.locator('[data-action="backspace"]').click()
+  await expect(page.locator('#expression')).toHaveText('6')
 })
 
 test('removes the complete pi token with backspace', async ({ page }) => {
@@ -223,8 +294,128 @@ async function clickKey(page: Page, key: string) {
     return
   }
 
+  if (key === '‖') {
+    await page.locator('[data-token="||"]').click()
+    return
+  }
+
+  if (key === 'INV') {
+    await page.locator('#inverse').click()
+    return
+  }
+
+  if (['sin', 'cos', 'tan', '√'].includes(key)) {
+    const name = key === '√' ? 'sqrt' : key
+    await page.locator(`[data-fn="${name}"]`).click()
+    return
+  }
+
+  const tokenAliases: Record<string, string> = {
+    xʸ: '^',
+    x²: '^2',
+    e: 'e',
+  }
+  if (tokenAliases[key]) {
+    await page.locator(`[data-token="${tokenAliases[key]}"]`).click()
+    return
+  }
+
   await page.locator(`[data-token="${key}"]`).click()
 }
+
+test('evaluates trigonometric functions in degrees', async ({ page }) => {
+  await page.goto('./')
+
+  for (const key of ['sin', '(', '3', '0', ')', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('0.5')
+
+  await page.locator('[data-action="clear"]').click()
+  for (const key of ['cos', '(', '6', '0', ')', '+', 'tan', '(', '4', '5', ')', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('1.5')
+})
+
+test('switches trigonometric keys into inverse mode', async ({ page }) => {
+  await page.goto('./')
+
+  await expect(page.locator('#inverse')).toHaveAttribute('aria-pressed', 'false')
+  await clickKey(page, 'INV')
+  await expect(page.locator('#inverse')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-fn="sin"]')).toContainText('sin−1')
+
+  for (const key of ['sin', '(', '0', '.', '5', ')', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#expression')).toHaveText('asin(0.5)')
+  await expect(page.locator('#result')).toHaveText('30')
+
+  await clickKey(page, 'INV')
+  await expect(page.locator('[data-fn="sin"]')).toContainText('sin')
+  await expect(page.locator('#inverse')).toHaveAttribute('aria-pressed', 'false')
+})
+
+test('evaluates powers, squares, constants and roots', async ({ page }) => {
+  await page.goto('./')
+
+  for (const key of ['2', 'xʸ', '1', '0', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('1024')
+
+  await page.locator('[data-action="clear"]').click()
+  for (const key of ['5', 'x²', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('25')
+
+  await page.locator('[data-action="clear"]').click()
+  for (const key of ['√', '(', '−', '4', ')', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('2i')
+
+  await page.locator('[data-action="clear"]').click()
+  for (const key of ['8', 'xʸ', '(', '1', '÷', '3', ')', '=']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#result')).toHaveText('2')
+
+  await page.locator('[data-action="clear"]').click()
+  await clickKey(page, 'e')
+  await clickKey(page, '=')
+  await expect(page.locator('#result')).toContainText('2.7182818284')
+})
+
+test('previews and completes expressions with unclosed parentheses', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  for (const key of ['sin', '(', '3', '0']) {
+    await clickKey(page, key)
+  }
+  await expect(page.locator('#expression')).toHaveText('sin(30')
+  await expect(page.locator('#result')).toHaveText('0.5')
+
+  await clickKey(page, '=')
+  await expect(page.locator('#expression')).toHaveText('sin(30)')
+  await expect(page.locator('#result')).toHaveText('0.5')
+})
+
+test('shows an error message for undefined trigonometric results', async ({
+  page,
+}) => {
+  await page.goto('./')
+
+  for (const key of ['tan', '(', '9', '0', ')', '=']) {
+    await clickKey(page, key)
+  }
+
+  await expect(page.locator('#result')).toHaveText('算式错误：结果无定义')
+})
 
 test('keeps controls within the mobile viewport', async ({ page }) => {
   await page.goto('./')
@@ -241,7 +432,7 @@ test('keeps controls within the mobile viewport', async ({ page }) => {
 
   const keys = page.locator('.key')
   const count = await keys.count()
-  expect(count).toBe(26)
+  expect(count).toBe(35)
 
   for (let index = 0; index < count; index += 1) {
     const box = await keys.nth(index).boundingBox()

@@ -9,10 +9,15 @@ import {
   X,
 } from 'lucide'
 import {
+  autoCloseParentheses,
   evaluateExpression,
+  evaluatePreview,
   formatExpressionParts,
   formatPolar,
   formatRectangular,
+  formatTokenText,
+  matchTokenLengthAt,
+  matchTokenLengthBefore,
   valueToExpression,
   type AngleUnit,
   type CalculationResult,
@@ -29,18 +34,31 @@ interface DisplayPreferences {
   resultSize: number
 }
 
+const TRIG_FUNCTIONS = ['sin', 'cos', 'tan'] as const
+
 const keypadTemplate = `
   <button class="key key--utility" type="button" data-action="clear" aria-label="清空">C</button>
   <button class="key key--utility" type="button" data-token="(" aria-label="左括号">(</button>
   <button class="key key--utility" type="button" data-token=")" aria-label="右括号">)</button>
   <button class="key key--utility key--icon" type="button" data-action="backspace" aria-label="退格" title="退格"></button>
 
+  <button class="key key--trig" type="button" data-fn="sin" aria-label="正弦">sin</button>
+  <button class="key key--trig" type="button" data-fn="cos" aria-label="余弦">cos</button>
+  <button class="key key--trig" type="button" data-fn="tan" aria-label="正切">tan</button>
+  <button class="key key--inverse" id="inverse" type="button" aria-pressed="false" aria-label="切换反三角" title="切换为正运算/反运算">INV</button>
+
+  <button class="key key--function" type="button" data-token="^" aria-label="幂" title="幂：xʸ">xʸ</button>
+  <button class="key key--function" type="button" data-fn="sqrt" aria-label="平方根" title="平方根">√</button>
+  <button class="key key--function" type="button" data-token="^2" aria-label="平方" title="平方">x²</button>
+  <button class="key key--function" type="button" data-token="e" aria-label="自然常数 e" title="自然常数 e">e</button>
+
   <button class="key key--function" type="button" data-token="pi" aria-label="圆周率 π" title="圆周率 π">π</button>
   <button class="key key--function" type="button" data-token="i">i</button>
   <button class="key key--function key--word" type="button" data-action="conjugate">共轭</button>
   <button class="key key--function" type="button" data-token="%">%</button>
 
-  <button class="key key--unit key--span-2" id="angle-unit" type="button"></button>
+  <button class="key key--unit" id="angle-unit" type="button"></button>
+  <button class="key key--parallel" type="button" data-token="||" aria-label="并联计算" title="并联：a||b = a×b÷(a+b)">||</button>
   <button class="key key--function" type="button" data-token="∠" aria-label="极坐标角度" title="极坐标：半径∠角度">∠</button>
   <button class="key key--operator" type="button" data-operator="/">÷</button>
 
@@ -68,8 +86,9 @@ export class CalculatorApp {
   private readonly appElement: HTMLDivElement
   private readonly expressionElement: HTMLDivElement
   private readonly resultElement: HTMLDivElement
-  private readonly polarElement: HTMLDivElement
+  private readonly polarElement: HTMLButtonElement
   private readonly polarValueElement: HTMLSpanElement
+  private readonly polarUnitBadgeElement: HTMLSpanElement
   private readonly updateBanner: HTMLDivElement
   private readonly settingsButton: HTMLButtonElement
   private readonly settingsLayer: HTMLDivElement
@@ -84,6 +103,16 @@ export class CalculatorApp {
   private expression = ''
   private cursor = 0
   private angleUnit: AngleUnit = readStoredAngleUnit()
+  /**
+   * 极坐标结果使用哪种角度单位显示：与按键的 angleUnit 解耦，
+   * 默认始终为角度制，只有点击极坐标行时才切换，且不随按键变化。
+   */
+  private polarUnit: AngleUnit = 'degrees'
+  /**
+   * INV 是常驻切换键：默认正运算（sin/cos/tan），
+   * 打开后同样的三个键输入反三角（asin/acos/atan），再点一次恢复。
+   */
+  private inverseMode = false
   private displayPreferences = readStoredDisplayPreferences()
   private result: CalculationResult | null = null
   private lastValue: ComplexValue | null = null
@@ -97,8 +126,10 @@ export class CalculatorApp {
 
     this.expressionElement = this.requireElement<HTMLDivElement>('#expression')
     this.resultElement = this.requireElement<HTMLDivElement>('#result')
-    this.polarElement = this.requireElement<HTMLDivElement>('#polar')
+    this.polarElement = this.requireElement<HTMLButtonElement>('#polar')
     this.polarValueElement = this.requireElement<HTMLSpanElement>('#polar-value')
+    this.polarUnitBadgeElement =
+      this.requireElement<HTMLSpanElement>('#polar-unit-badge')
     this.updateBanner = this.requireElement<HTMLDivElement>('#update-banner')
     this.settingsButton =
       this.requireElement<HTMLButtonElement>('#settings-button')
@@ -122,6 +153,8 @@ export class CalculatorApp {
     this.addIcons()
     this.bindEvents()
     this.updateAngleUnitButton()
+    this.updatePolarUnitBadge()
+    this.updateInverseKey()
     this.applyDisplayPreferences()
     this.render()
   }
@@ -162,10 +195,11 @@ export class CalculatorApp {
           <div class="result-block" aria-live="polite">
             <span class="field-label" id="result-label">结果</span>
             <div class="result" id="result">0</div>
-            <div class="polar" id="polar" aria-hidden="true">
-              <span>极坐标</span>
+            <button class="polar" id="polar" type="button" aria-hidden="true" tabindex="-1">
+              <span class="polar-label">极坐标</span>
+              <span class="polar-unit-badge" id="polar-unit-badge">deg</span>
               <span id="polar-value"></span>
-            </div>
+            </button>
           </div>
         </section>
 
@@ -275,6 +309,16 @@ export class CalculatorApp {
         return
       }
 
+      if (key.id === 'inverse') {
+        this.toggleInverseMode()
+        return
+      }
+
+      if (key.id === 'polar') {
+        this.togglePolarUnit()
+        return
+      }
+
       if (key.id === 'update-now') {
         this.updateAction?.()
         key.disabled = true
@@ -291,6 +335,8 @@ export class CalculatorApp {
         this.appendDigit(key.dataset.digit)
       } else if (key.dataset.operator) {
         this.appendOperator(key.dataset.operator)
+      } else if (key.dataset.fn) {
+        this.insertFunction(key.dataset.fn)
       } else if (key.dataset.token) {
         this.appendToken(key.dataset.token)
       } else if (key.dataset.action) {
@@ -367,7 +413,7 @@ export class CalculatorApp {
       return
     }
 
-    if (/[+\-*/]/.test(previous) || /[+\-*/]/.test(next)) {
+    if (/[+\-*/|]/.test(previous) || /[+\-*/|]/.test(next)) {
       return
     }
 
@@ -427,6 +473,18 @@ export class CalculatorApp {
         return
       }
       this.insertAtCursor('∠')
+    } else if (token === '||') {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      const next = this.expression[this.cursor] ?? ''
+      if (
+        !/[\d)i%]/.test(previous) ||
+        next === '|' ||
+        next === ')' ||
+        this.isInsidePolarAngleContext()
+      ) {
+        return
+      }
+      this.insertAtCursor('||')
     } else if (token === '%') {
       const previous = this.expression[this.cursor - 1] ?? ''
       if (
@@ -437,6 +495,24 @@ export class CalculatorApp {
         return
       }
       this.insertAtCursor('%')
+    } else if (token === '^' || token === '^2') {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      const next = this.expression[this.cursor] ?? ''
+      if (
+        !/[\d)i%e]/.test(previous) ||
+        next === '^' ||
+        this.isInsidePolarAngleContext()
+      ) {
+        return
+      }
+      this.insertAtCursor(token)
+    } else if (token === 'e') {
+      const previous = this.expression[this.cursor - 1] ?? ''
+      if (previous === 'e' || this.isInsidePolarAngleContext()) {
+        return
+      }
+      const prefix = /[\d)i%]/.test(previous) ? '*' : ''
+      this.insertAtCursor(`${prefix}e`)
     }
 
     this.refreshPreview()
@@ -460,23 +536,16 @@ export class CalculatorApp {
 
   private backspace(): void {
     this.prepareForInput(true)
-    const before = this.expression.slice(0, this.cursor)
-    let deleteLength = 1
 
-    if (before.endsWith('conj(')) {
-      deleteLength = 5
-    } else if (before.endsWith('pi')) {
-      deleteLength = 2
-    }
-
-    if (this.cursor > 0) {
-      this.expression =
-        this.expression.slice(0, this.cursor - deleteLength) +
-        this.expression.slice(this.cursor)
-      this.cursor -= deleteLength
-    } else {
+    if (this.cursor <= 0) {
       return
     }
+
+    const deleteLength = matchTokenLengthBefore(this.expression, this.cursor)
+    this.expression =
+      this.expression.slice(0, this.cursor - deleteLength) +
+      this.expression.slice(this.cursor)
+    this.cursor -= deleteLength
     this.refreshPreview()
     this.render()
   }
@@ -515,6 +584,71 @@ export class CalculatorApp {
     this.render()
   }
 
+  /**
+   * 插入 `sin(`、`sqrt(` 这类函数调用：紧跟数字/右括号时会自动补乘号，
+   * 极坐标角度里不允许出现函数（`5∠sin(30)` 无法解析）。
+   */
+  private insertFunction(name: string): void {
+    this.prepareForInput(false)
+    const previous = this.expression[this.cursor - 1] ?? ''
+    if (previous === '∠' || this.isInsidePolarAngleContext()) {
+      return
+    }
+
+    const resolved =
+      this.inverseMode && (TRIG_FUNCTIONS as readonly string[]).includes(name)
+        ? `a${name}`
+        : name
+    const prefix = /[\d)i%]/.test(previous) ? '*' : ''
+    this.insertAtCursor(`${prefix}${resolved}(`)
+    this.refreshPreview()
+    this.render()
+  }
+
+  private toggleInverseMode(): void {
+    this.inverseMode = !this.inverseMode
+    this.updateInverseKey()
+  }
+
+  private updateInverseKey(): void {
+    const inverseButton =
+      this.appElement.querySelector<HTMLButtonElement>('#inverse')
+    inverseButton?.classList.toggle('is-active', this.inverseMode)
+    inverseButton?.setAttribute('aria-pressed', String(this.inverseMode))
+    inverseButton?.setAttribute(
+      'title',
+      this.inverseMode ? '当前为反运算，点击切回正运算' : '当前为正运算，点击切换为反运算',
+    )
+
+    for (const name of TRIG_FUNCTIONS) {
+      const key = this.appElement.querySelector<HTMLButtonElement>(
+        `[data-fn="${name}"]`,
+      )
+      if (!key) {
+        continue
+      }
+
+      const base = document.createElement('span')
+      base.className = 'key-fn-base'
+      base.textContent = name
+
+      if (!this.inverseMode) {
+        key.replaceChildren(base)
+        key.setAttribute('aria-label', name === 'sin' ? '正弦' : name === 'cos' ? '余弦' : '正切')
+        continue
+      }
+
+      const exponent = document.createElement('span')
+      exponent.className = 'key-fn-exponent'
+      exponent.textContent = '−1'
+      key.replaceChildren(base, exponent)
+      key.setAttribute(
+        'aria-label',
+        name === 'sin' ? '反正弦' : name === 'cos' ? '反余弦' : '反正切',
+      )
+    }
+  }
+
   private toggleAngleUnit(): void {
     this.angleUnit =
       this.angleUnit === 'degrees' ? 'radians' : 'degrees'
@@ -526,10 +660,25 @@ export class CalculatorApp {
 
   private updateAngleUnitButton(): void {
     const isDegrees = this.angleUnit === 'degrees'
-    this.angleUnitButton.textContent = isDegrees ? '角度制' : '弧度制'
+    const degrees = document.createElement('span')
+    degrees.className = 'unit-option'
+    degrees.textContent = 'deg'
+    degrees.classList.toggle('is-active', isDegrees)
+
+    const separator = document.createElement('span')
+    separator.className = 'unit-separator'
+    separator.setAttribute('aria-hidden', 'true')
+    separator.textContent = '/'
+
+    const radians = document.createElement('span')
+    radians.className = 'unit-option'
+    radians.textContent = 'rad'
+    radians.classList.toggle('is-active', !isDegrees)
+
+    this.angleUnitButton.replaceChildren(degrees, separator, radians)
     this.angleUnitButton.setAttribute(
       'aria-label',
-      `${isDegrees ? '角度制' : '弧度制'}，点击切换`,
+      `当前为${isDegrees ? '角度制，点击切换为弧度制' : '弧度制，点击切换为角度制'}`,
     )
     this.angleUnitButton.title = isDegrees
       ? '当前为角度制，点击切换为弧度制'
@@ -539,6 +688,12 @@ export class CalculatorApp {
   private calculate(): void {
     if (!this.expression) {
       return
+    }
+
+    // `=` 自动补齐缺失的右括号，省去用户手动补 `)` 的步骤。
+    const completedExpression = autoCloseParentheses(this.expression)
+    if (completedExpression !== this.expression) {
+      this.expression = completedExpression
     }
 
     this.result = evaluateExpression(this.expression, this.angleUnit)
@@ -574,15 +729,8 @@ export class CalculatorApp {
       return
     }
 
-    let result = evaluateExpression(this.expression, this.angleUnit)
-
-    if (!result.ok && /[+\-*/∠]$/.test(this.expression)) {
-      result = evaluateExpression(
-        this.expression.slice(0, -1),
-        this.angleUnit,
-      )
-    }
-
+    // 预览比 `=` 宽容：允许缺右括号、允许末尾停在运算符上。
+    const result = evaluatePreview(this.expression, this.angleUnit)
     this.result = result.ok ? result : null
     this.lastValue = result.ok ? result.value : null
   }
@@ -620,7 +768,7 @@ export class CalculatorApp {
     this.resultElement.textContent = formatRectangular(this.result.value)
     this.polarValueElement.textContent = formatPolar(
       this.result.value,
-      this.angleUnit,
+      this.polarUnit,
     )
     this.setPolarVisible(true)
   }
@@ -628,6 +776,26 @@ export class CalculatorApp {
   private setPolarVisible(visible: boolean): void {
     this.polarElement.classList.toggle('is-visible', visible)
     this.polarElement.setAttribute('aria-hidden', String(!visible))
+    this.polarElement.tabIndex = visible ? 0 : -1
+  }
+
+  private togglePolarUnit(): void {
+    this.polarUnit = this.polarUnit === 'degrees' ? 'radians' : 'degrees'
+    this.updatePolarUnitBadge()
+    this.render()
+  }
+
+  private updatePolarUnitBadge(): void {
+    const isDegrees = this.polarUnit === 'degrees'
+    const current = isDegrees ? '角度制' : '弧度制'
+    const next = isDegrees ? '弧度制' : '角度制'
+
+    this.polarUnitBadgeElement.textContent = isDegrees ? 'deg' : 'rad'
+    this.polarElement.setAttribute(
+      'aria-label',
+      `极坐标结果，当前按${current}显示，点击切换为${next}`,
+    )
+    this.polarElement.title = `极坐标当前按${current}显示，点击切换为${next}`
   }
 
   private renderExpression(): void {
@@ -650,13 +818,18 @@ export class CalculatorApp {
           caretPlaced = true
         }
 
-        const isPi = this.expression.startsWith('pi', index)
-        const end = isPi ? index + 2 : index + 1
+        const tokenLength = matchTokenLengthAt(this.expression, index)
+        const end = Math.min(index + tokenLength, part.end)
         const character = document.createElement('span')
         character.className = 'expression-char'
+        if (tokenLength > 1) {
+          character.classList.add('expression-char--token')
+        }
         character.dataset.start = String(index)
         character.dataset.end = String(end)
-        character.textContent = isPi ? 'π' : formatExpressionChar(this.expression[index] ?? '')
+        character.textContent = formatTokenText(
+          this.expression.slice(index, end),
+        )
         container.append(character)
 
         if (!caretPlaced && this.cursor > index && this.cursor < end) {
@@ -716,15 +889,11 @@ export class CalculatorApp {
 
   private moveCursor(direction: -1 | 1): void {
     if (direction < 0) {
-      this.cursor =
-        this.expression.slice(this.cursor - 2, this.cursor) === 'pi'
-          ? this.cursor - 2
-          : Math.max(0, this.cursor - 1)
+      const step = matchTokenLengthBefore(this.expression, this.cursor)
+      this.cursor = Math.max(0, this.cursor - step)
     } else {
-      this.cursor =
-        this.expression.slice(this.cursor, this.cursor + 2) === 'pi'
-          ? this.cursor + 2
-          : Math.min(this.expression.length, this.cursor + 1)
+      const step = matchTokenLengthAt(this.expression, this.cursor)
+      this.cursor = Math.min(this.expression.length, this.cursor + step)
     }
     this.render()
   }
@@ -858,6 +1027,7 @@ export class CalculatorApp {
     const { expressionSize, resultSize } = this.displayPreferences
     const keySize = 54
     const keyGap = 8
+    const keypadRows = 9
 
     rootStyle.setProperty('--expression-size', `${expressionSize}px`)
     rootStyle.setProperty('--result-size', `${resultSize}px`)
@@ -866,7 +1036,7 @@ export class CalculatorApp {
     rootStyle.setProperty('--key-height', `${keySize}px`)
     rootStyle.setProperty(
       '--keypad-height',
-      `${keySize * 7 + keyGap * 6}px`,
+      `${keySize * keypadRows + keyGap * (keypadRows - 1)}px`,
     )
     rootStyle.setProperty(
       '--key-digit-size',
@@ -895,6 +1065,14 @@ export class CalculatorApp {
     rootStyle.setProperty(
       '--key-unit-size',
       `${Math.max(12, Math.round(keySize * 0.27))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-trig-size',
+      `${Math.max(13, Math.round(keySize * 0.3))}px`,
+    )
+    rootStyle.setProperty(
+      '--key-inverse-size',
+      `${Math.max(11, Math.round(keySize * 0.24))}px`,
     )
 
     this.settingsLayer
@@ -956,8 +1134,10 @@ export class CalculatorApp {
       localStorage.removeItem(ANGLE_UNIT_STORAGE_KEY)
       localStorage.removeItem(DISPLAY_SETTINGS_STORAGE_KEY)
       this.angleUnit = 'degrees'
+      this.polarUnit = 'degrees'
       this.displayPreferences = { ...DEFAULT_DISPLAY_PREFERENCES }
       this.updateAngleUnitButton()
+      this.updatePolarUnitBadge()
       this.applyDisplayPreferences()
       this.updateBanner.hidden = true
       this.setSettingsStatus(
@@ -1028,6 +1208,15 @@ export class CalculatorApp {
     } else if (event.key.toLowerCase() === 'i') {
       event.preventDefault()
       this.appendToken('i')
+    } else if (event.key.toLowerCase() === 'e') {
+      event.preventDefault()
+      this.appendToken('e')
+    } else if (event.key === '^') {
+      event.preventDefault()
+      this.appendToken('^')
+    } else if (event.key === '|' || event.key === '\\') {
+      event.preventDefault()
+      this.appendToken('||')
     } else if (event.key === 'π' || event.key.toLowerCase() === 'p') {
       event.preventDefault()
       this.appendToken('pi')
@@ -1206,11 +1395,4 @@ function clampPreference(
   }
 
   return Math.min(max, Math.max(min, Math.round(value)))
-}
-
-function formatExpressionChar(character: string): string {
-  if (character === '*') return '×'
-  if (character === '/') return '÷'
-  if (character === '-') return '−'
-  return character
 }
